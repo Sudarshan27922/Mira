@@ -138,3 +138,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 agents/config/service-account-key.json
+
+.pyc
+.pycache
