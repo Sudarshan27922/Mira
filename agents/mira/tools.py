@@ -5,6 +5,7 @@ from typing import Dict
 from .sub_agents.hr.agent import get_hr_agent_executor
 from .sub_agents.it.agent import get_it_agent_executor
 from .sub_agents.rm.agent import get_rm_agent_executor
+from .rag_tool import RAG_TOOLS
 
 
 # Wrap sub-agent executors as tools callable by the main agent
@@ -39,4 +40,5 @@ RM_Agent = _make_agent_tool(
     executor_factory=get_rm_agent_executor,
 )
 
-TOOLS = [HR_Agent, IT_Agent, RM_Agent]
+# Combine sub-agent tools with RAG tools
+TOOLS = [HR_Agent, IT_Agent, RM_Agent] + RAG_TOOLS
