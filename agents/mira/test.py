@@ -1,5 +1,17 @@
 from collections import deque
-from .mira import main_agent
+
+# Support running as a module (python -m agents.mira.test)
+# and as a script (python agents/mira/test.py)
+try:
+	from .mira import main_agent  # type: ignore
+except ImportError:
+	import os
+	import sys
+	# Add project root to sys.path
+	PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+	if PROJECT_ROOT not in sys.path:
+		sys.path.insert(0, PROJECT_ROOT)
+	from agents.mira.mira import main_agent  # type: ignore
 
 
 def run_chat() -> None:
