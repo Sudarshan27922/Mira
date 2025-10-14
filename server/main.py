@@ -552,9 +552,9 @@ async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, 
             print(f"❌ No user context found for {sender_email}")
             return
         
-        supervisor_email = user_context.get("reporting_manager")
+        supervisor_email = user_context.get("manager_email")
         if not supervisor_email:
-            print(f"❌ No supervisor found for {sender_email}")
+            print(f"❌ No manager found for {sender_email}")
             return
         
         # Create complete leave request payload
