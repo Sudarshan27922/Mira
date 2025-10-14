@@ -42,10 +42,14 @@ def leave_process_workflow(payload: Dict[str, Any]) -> Dict[str, Any]:
     if missing:
         return {"status": "MISSING_FIELDS", "missing": missing}
 
-    rec = record_leave_request.run(payload={**payload, "status": "COLLECTED"})
+    rec = record_leave_request.invoke({"payload": {**payload, "status": "COLLECTED"}})
     request_id = rec["request_id"]
 
-    conflicts = check_calendar_conflicts.run(payload["employee_email"], payload["start_date"], payload["end_date"])  # type: ignore[arg-type]
+    conflicts = check_calendar_conflicts.invoke({
+        "user_email": payload["employee_email"],
+        "start_date": payload["start_date"],
+        "end_date": payload["end_date"],
+    })
     if conflicts.get("conflicts"):
         return {
             "status": "WAITING_USER_DECISION",
@@ -54,7 +58,11 @@ def leave_process_workflow(payload: Dict[str, Any]) -> Dict[str, Any]:
             "message": "Conflicts found. Proceed anyway or choose new dates?"
         }
 
-    send_supervisor_approval.run(request_id, payload["supervisor_email"], "Leave approval request")  # type: ignore[arg-type]
+    send_supervisor_approval.invoke({
+        "request_id": request_id,
+        "supervisor_email": payload["supervisor_email"],
+        "summary": "Leave approval request",
+    })
     return {"status": "WAITING_SUPERVISOR", "request_id": request_id}
 
 

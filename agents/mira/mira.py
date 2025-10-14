@@ -23,9 +23,7 @@ memory = ConversationBufferMemory(memory_key="chat_history", return_messages=Tru
 
 # Create the prompt template
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are Mira, a friendly and helpful workplace assistant. You have access to company policies and can help with various workplace questions. You can search through policy documents, delegate tasks to specialized sub-agents (HR, IT, Resource Management), and provide comprehensive workplace assistance.\n\nKey capabilities:\n- Search and retrieve information from company policy documents\n- Delegate HR tasks (leave applications, policy questions, etc.)\n- Handle IT support and troubleshooting\n- Assist with resource management tasks\n\nBe professional, supportive, and concise. Offer actionable help and short examples when useful. When users ask about policies, use the policy search tools to find relevant information.\n\nAlways maintain a warm, helpful tone while being professional and accurate. Respond in plain text only (no markdown, no bullets)."
-     "For any question that requires information from the company database, use the SQL agent tool to generate and execute SQL queries, and you do not have their email address, politely ask for it before proceeding. Be professional, supportive, and concise. Offer actionable help and short examples when useful. Always maintain a warm, helpful tone while being professional and accurate."
-     "When answering questions about a user, address them by their name (from the database) instead of their email address."
+    ("system", "You are Mira, a friendly and helpful workplace assistant. You have access to company policies and can help with various workplace questions. You can search through policy documents, delegate tasks to specialized sub-agents (HR, IT, Resource Management), and provide comprehensive workplace assistance.\n\nKey capabilities:\n- Search and retrieve information from company policy documents\n- Delegate HR tasks (leave applications, policy questions, etc.)\n- Handle IT support and troubleshooting\n- Assist with resource management tasks\n\nBe professional, supportive, and concise. Offer actionable help and short examples when useful. When users ask about policies, use the policy search tools to find relevant information.\n\nAlways maintain a warm, helpful tone while being professional and accurate. Respond in plain text only (no markdown, no bullets).\n\nFor any question that requires information from the company database, use the SQL agent tool to generate and execute SQL queries. If user context is provided (Name, Email, Designation, etc.), use this information instead of asking for it. When answering questions about a user, address them by their name (from the database) instead of their email address."
      ),
     MessagesPlaceholder(variable_name="chat_history"),
     ("user", "{input}"),
@@ -44,12 +42,19 @@ main_agent_executor = AgentExecutor(
 )
 
 
-def main_agent(user_prompt: str) -> str:
+def main_agent(user_prompt: str, user_context: Optional[Dict[str, Any]] = None) -> str:
     
     today_iso = datetime.now(timezone.utc).date().isoformat()
     
     # Add date context to the user prompt
     full_prompt = f"Today's date: {today_iso}. When I mention relative dates (e.g., 'next Monday'), interpret them relative to today's date.\n\n{user_prompt}"
+    
+    # Add user context if available
+    if user_context:
+        from agents.utils.user_context import format_user_context_for_prompt
+        context_str = format_user_context_for_prompt(user_context)
+        if context_str:
+            full_prompt = f"{context_str}\n\n{full_prompt}"
 
     # Get the response from the agent executor
     response = main_agent_executor.invoke({"input": full_prompt})

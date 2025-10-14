@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from agents.mira.mira import main_agent
+from agents.utils.user_context import get_user_context_from_db
 
 # Load environment variables
 load_dotenv()
@@ -329,8 +330,15 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         print(f"💡 Processing message with Mira: \"{message_text}\"")
         print(f"👤 From: {sender_display_name} ({sender_email})")
         
-        # Get response from Mira agent
-        agent_response = main_agent(message_text)
+        # Retrieve user context from database
+        user_context = get_user_context_from_db(sender_email, space_name)
+        if user_context:
+            print(f"✅ Found user context: {user_context.get('emp_name', 'Unknown')} ({user_context.get('designation', 'Unknown')})")
+        else:
+            print(f"⚠️ No user context found for {sender_email}")
+        
+        # Get response from Mira agent with user context
+        agent_response = main_agent(message_text, user_context)
         
         if agent_response:
             print(f"💬 Sending Mira response to {space_name}...")
