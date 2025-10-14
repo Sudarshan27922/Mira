@@ -1,0 +1,54 @@
+import os
+import json
+import threading
+from typing import Optional, List, Dict, Any
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from langchain_core.tools import tool
+
+_engine_lock = threading.Lock()
+_engine: Optional[Engine] = None
+
+def _get_engine() -> Engine:
+    global _engine
+    if _engine is None:
+        with _engine_lock:
+            if _engine is None:
+                url = os.getenv("DATABASE_URL")
+                if not url:
+                    raise RuntimeError("DATABASE_URL is not set in environment.")
+                _engine = create_engine(
+                    url,
+                    pool_pre_ping=True,
+                )
+    return _engine
+
+def _is_read_only_sql(sql: str) -> bool:
+    s = sql.strip().lower()
+    # Allow only single read-only statement
+    if not (s.startswith("select") or s.startswith("with") or s.startswith("explain")):
+        return False
+    # Disallow multiple statements
+    parts = [p for p in s.split(";") if p.strip()]
+    return len(parts) <= 1
+
+@tool("execute_sql_query")
+def execute_sql_query(sql: str) -> str:
+    """
+    Execute a read-only SQL query (SELECT/WITH/EXPLAIN) against PostgreSQL and return up to 1000 rows as JSON.
+    Input must be a single read-only statement. Do not pass natural language.
+    """
+    if not _is_read_only_sql(sql):
+        return "Only single read-only SQL is allowed. Begin with SELECT/WITH/EXPLAIN and avoid multiple statements."
+    try:
+        eng = _get_engine()
+        with eng.connect() as conn:
+            result = conn.execute(text(sql))
+            rows = result.fetchall()
+            data: List[Dict[str, Any]] = [dict(r._mapping) for r in rows[:1000]]
+        return json.dumps(data, default=str)
+    except Exception as e:
+        return f"SQL execution failed: {e}"
+
+SQL_TOOLS = [execute_sql_query]
