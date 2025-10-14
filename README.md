@@ -6,6 +6,7 @@ This guide helps you set up Mira locally: create a virtual environment, install 
 
 - Python 3.10+ (tested with 3.13)
 - An API key for Google Gemini (GEMINI_API_KEY)
+- A Pinecone API key (PINECONE_API_KEY) for RAG capabilities
 
 ### 1) Clone and enter the project
 
@@ -38,15 +39,30 @@ pip install -r requirements.txt
 
 ### 4) Configure environment variables
 
-Create a `.env` file in the project root with your Gemini API key:
+Create a `.env` file in the project root with your API keys:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
+PINECONE_API_KEY=your_pinecone_api_key_here
 ```
 
 The app loads this automatically via `dotenv` (see `agents/config/llm_config.py`).
 
-### 5A) Run the CLI chat
+### 5) Setup RAG System (Optional but Recommended)
+
+Mira includes powerful RAG capabilities for searching through company policy documents:
+
+```bash
+# Setup the vector store with policy documents
+python setup_rag.py
+
+# Test the RAG system
+python test_mira.py
+```
+
+This will process all PDF documents in `agents/docs/` and make them searchable.
+
+### 6A) Run the CLI chat
 
 From the project root:
 
@@ -70,7 +86,7 @@ macOS/Linux:
 PYTHONPATH=. python agents/mira/test.py
 ```
 
-### 5B) Run the API server (optional)
+### 6B) Run the API server (optional)
 
 The FastAPI app lives under `server/main.py`.
 
