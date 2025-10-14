@@ -51,4 +51,53 @@ def execute_sql_query(sql: str) -> str:
     except Exception as e:
         return f"SQL execution failed: {e}"
 
-SQL_TOOLS = [execute_sql_query]
+@tool("list_public_tables")
+def list_public_tables(_: str = "") -> str:
+    """
+    List tables in the public schema. Input ignored.
+    """
+    try:
+        eng = _get_engine()
+        with eng.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema='public'
+                    ORDER BY table_name
+                    """
+                )
+            )
+            rows = result.fetchall()
+            data: List[Dict[str, Any]] = [dict(r._mapping) for r in rows]
+        return json.dumps(data, default=str)
+    except Exception as e:
+        return f"Schema inspection failed: {e}"
+
+@tool("describe_table_columns")
+def describe_table_columns(table_name: str) -> str:
+    """
+    Describe columns for a given table in public schema. Input: table name.
+    """
+    try:
+        eng = _get_engine()
+        with eng.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name=:t
+                    ORDER BY ordinal_position
+                    """
+                ),
+                {"t": table_name},
+            )
+            rows = result.fetchall()
+            data: List[Dict[str, Any]] = [dict(r._mapping) for r in rows]
+        return json.dumps(data, default=str)
+    except Exception as e:
+        return f"Schema inspection failed: {e}"
+
+SQL_TOOLS = [execute_sql_query, list_public_tables, describe_table_columns]
