@@ -36,7 +36,7 @@ def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict
             result = conn.execute(
                 text("""
                     SELECT emp_name, emp_email, designation, emp_type, business_unit, 
-                           is_resigning, resignation_date
+                           is_resigning, resignation_date, reporting_manager
                     FROM public.employee 
                     WHERE emp_email = :email 
                     LIMIT 1
@@ -61,7 +61,8 @@ def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict
                     "emp_type": row.emp_type,
                     "business_unit": row.business_unit,
                     "is_resigning": row.is_resigning,
-                    "resignation_date": str(row.resignation_date) if row.resignation_date else None
+                    "resignation_date": str(row.resignation_date) if row.resignation_date else None,
+                    "reporting_manager": row.reporting_manager
                 }
             
             return None
@@ -94,6 +95,8 @@ def format_user_context_for_prompt(user_context: Dict[str, Any]) -> str:
         context_parts.append(f"Employee Type: {user_context['emp_type']}")
     if user_context.get("business_unit"):
         context_parts.append(f"Business Unit: {user_context['business_unit']}")
+    if user_context.get("reporting_manager"):
+        context_parts.append(f"Reporting Manager: {user_context['reporting_manager']}")
     
     if context_parts:
         return f"User context: {', '.join(context_parts)}"

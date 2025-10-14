@@ -1,5 +1,7 @@
 from typing import Dict, Any
 from langchain_core.tools import tool
+import httpx
+import os
 
 
 @tool
@@ -31,39 +33,127 @@ def record_leave_request(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @tool
-def leave_process_workflow(payload: Dict[str, Any]) -> Dict[str, Any]:
+def leave_process_workflow(payload: Dict[str, Any], space_name: str = None) -> Dict[str, Any]:
     """Composite workflow: validate -> check conflicts -> (maybe) request decision -> approval -> finalize.
 
     This is a stubbed synchronous version; later replace with LangGraph and persistence.
     Returns a dict with at least {'status': str, 'request_id': str}.
     """
-    required = ["employee_email", "leave_type", "start_date", "end_date", "reason", "supervisor_email"]
-    missing = [k for k in required if not payload.get(k)]
-    if missing:
-        return {"status": "MISSING_FIELDS", "missing": missing}
+    # Check if this is a card response with complete data
+    if all(payload.get(k) for k in ["employee_email", "leave_type", "start_date", "end_date", "reason", "supervisor_email"]):
+        # Complete data provided - proceed with normal workflow
+        rec = record_leave_request.invoke({"payload": {**payload, "status": "COLLECTED"}})
+        request_id = rec["request_id"]
 
-    rec = record_leave_request.invoke({"payload": {**payload, "status": "COLLECTED"}})
-    request_id = rec["request_id"]
+        conflicts = check_calendar_conflicts.invoke({
+            "user_email": payload["employee_email"],
+            "start_date": payload["start_date"],
+            "end_date": payload["end_date"],
+        })
+        if conflicts.get("conflicts"):
+            return {
+                "status": "WAITING_USER_DECISION",
+                "request_id": request_id,
+                "conflicts": conflicts["conflicts"],
+                "message": "Conflicts found. Proceed anyway or choose new dates?"
+            }
 
-    conflicts = check_calendar_conflicts.invoke({
-        "user_email": payload["employee_email"],
-        "start_date": payload["start_date"],
-        "end_date": payload["end_date"],
-    })
-    if conflicts.get("conflicts"):
-        return {
-            "status": "WAITING_USER_DECISION",
+        send_supervisor_approval.invoke({
             "request_id": request_id,
-            "conflicts": conflicts["conflicts"],
-            "message": "Conflicts found. Proceed anyway or choose new dates?"
-        }
+            "supervisor_email": payload["supervisor_email"],
+            "summary": "Leave approval request",
+        })
+        return {"status": "WAITING_SUPERVISOR", "request_id": request_id}
+    
+    # Incomplete data - check if we have minimum required info to send card
+    elif payload.get("employee_email") and payload.get("supervisor_email") and space_name:
+        # Generate request ID and send card
+        import time
+        request_id = f"req_{int(time.time())}_{hash(payload['employee_email']) % 10000}"
+        
+        # Send the interactive card
+        card_result = send_leave_info_card.invoke({
+            "user_email": payload["employee_email"],
+            "space_name": space_name,
+            "supervisor_email": payload["supervisor_email"],
+            "request_id": request_id
+        })
+        
+        if card_result.get("status") == "CARD_SENT":
+            return {
+                "status": "WAITING_CARD_RESPONSE",
+                "request_id": request_id,
+                "message": "Interactive leave request form sent. Please fill in the details and submit."
+            }
+        else:
+            return {
+                "status": "ERROR",
+                "request_id": request_id,
+                "error": card_result.get("error", "Failed to send leave request card")
+            }
+    
+    # Missing required fields
+    else:
+        required = ["employee_email", "supervisor_email"]
+        missing = [k for k in required if not payload.get(k)]
+        if missing:
+            return {"status": "MISSING_FIELDS", "missing": missing}
+        
+        return {"status": "MISSING_SPACE", "message": "Space name required to send leave request card"}
 
-    send_supervisor_approval.invoke({
-        "request_id": request_id,
-        "supervisor_email": payload["supervisor_email"],
-        "summary": "Leave approval request",
-    })
-    return {"status": "WAITING_SUPERVISOR", "request_id": request_id}
+
+@tool
+def send_leave_info_card(user_email: str, space_name: str, supervisor_email: str, request_id: str) -> Dict[str, Any]:
+    """Send an interactive leave request card to the user for collecting leave details.
+    
+    Args:
+        user_email: Employee email address
+        space_name: Google Chat space name
+        supervisor_email: Supervisor's email address
+        request_id: Unique request identifier
+        
+    Returns:
+        Dict with status and request details
+    """
+    try:
+        port = int(os.getenv("PORT", 3005))
+        
+        # Call the server endpoint to send the leave card
+        with httpx.Client() as client:
+            response = client.post(
+                f"http://localhost:{port}/chat/send-leave-card",
+                json={
+                    "spaceName": space_name,
+                    "employeeEmail": user_email,
+                    "supervisorEmail": supervisor_email,
+                    "requestId": request_id
+                },
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "status": "CARD_SENT",
+                    "request_id": request_id,
+                    "space_name": space_name,
+                    "employee_email": user_email,
+                    "supervisor_email": supervisor_email,
+                    "message": "Leave request card sent successfully"
+                }
+            else:
+                return {
+                    "status": "ERROR",
+                    "request_id": request_id,
+                    "error": f"Failed to send card: {response.status_code} - {response.text}"
+                }
+                
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "request_id": request_id,
+            "error": f"Exception while sending card: {str(e)}"
+        }
 
 
 @tool
@@ -87,6 +177,7 @@ HR_TOOLS = [
     record_leave_request,
     leave_process_workflow,
     leave_process_resume,
+    send_leave_info_card,
 ]
 
 

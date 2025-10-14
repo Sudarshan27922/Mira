@@ -60,6 +60,12 @@ class SendCardRequest(BaseModel):
     text: str
     buttons: Optional[List[Dict[str, str]]] = None
 
+class SendLeaveCardRequest(BaseModel):
+    spaceName: str
+    employeeEmail: str
+    supervisorEmail: str
+    requestId: str
+
 class WebhookEvent(BaseModel):
     chat: Optional[Dict[str, Any]] = None
     applicationId: Optional[str] = None
@@ -208,6 +214,116 @@ def send_card(space_name: str, title: str, subtitle: str = None, text: str = "",
         print(f"❌ Error sending card: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
+def send_leave_request_card(space_name: str, employee_email: str, supervisor_email: str, request_id: str) -> Dict[str, Any]:
+    """Send an interactive leave request card with form widgets to a specific Google Chat space"""
+    if not chat_service:
+        raise HTTPException(status_code=500, detail="Google Chat service not initialized")
+    
+    try:
+        # Build the interactive card structure with form widgets
+        card = {
+            "cards": [{
+                "header": {
+                    "title": "Leave Request Form",
+                    "subtitle": f"Request ID: {request_id}"
+                },
+                "sections": [{
+                    "widgets": [
+                        {
+                            "textParagraph": {
+                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please fill in your leave details:"
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "dateTimePicker": {
+                                "label": "Start Date",
+                                "type": "DATE_AND_TIME",
+                                "valueMsEpoch": str(int(__import__('time').time() * 1000)),
+                                "name": "start_date"
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "dateTimePicker": {
+                                "label": "End Date", 
+                                "type": "DATE_AND_TIME",
+                                "valueMsEpoch": str(int(__import__('time').time() * 1000)),
+                                "name": "end_date"
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "selectionInput": {
+                                "type": "DROPDOWN",
+                                "label": "Leave Type",
+                                "name": "leave_type",
+                                "items": [
+                                    {"text": "Annual Leave", "value": "Annual"},
+                                    {"text": "Sick Leave", "value": "Sick"},
+                                    {"text": "Personal Leave", "value": "Personal"},
+                                    {"text": "Other", "value": "Other"}
+                                ]
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "textInput": {
+                                "label": "Reason for Leave",
+                                "type": "MULTIPLE_LINE",
+                                "name": "reason",
+                                "placeholder": "Please provide a brief reason for your leave request..."
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "buttons": [{
+                                "textButton": {
+                                    "text": "Submit Leave Request",
+                                    "onClick": {
+                                        "action": {
+                                            "actionMethodName": "SUBMIT_LEAVE_REQUEST",
+                                            "parameters": [
+                                                {"key": "request_id", "value": request_id},
+                                                {"key": "employee_email", "value": employee_email},
+                                                {"key": "supervisor_email", "value": supervisor_email}
+                                            ]
+                                        }
+                                    }
+                                }
+                            }]
+                        }
+                    ]
+                }]
+            }]
+        }
+        
+        response = chat_service.spaces().messages().create(
+            parent=space_name,
+            body=card
+        ).execute()
+        
+        return {
+            "success": True,
+            "messageId": response.get('name'),
+            "space": space_name,
+            "request_id": request_id,
+            "card": card
+        }
+    except Exception as error:
+        print(f"❌ Error sending leave request card: {error}")
+        raise HTTPException(status_code=500, detail=str(error))
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
@@ -282,6 +398,23 @@ async def send_card_endpoint(request: SendCardRequest):
         print(f"❌ Error in send card endpoint: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
+# Send leave request card to space
+@app.post("/chat/send-leave-card")
+async def send_leave_card_endpoint(request: SendLeaveCardRequest):
+    try:
+        result = send_leave_request_card(
+            space_name=request.spaceName,
+            employee_email=request.employeeEmail,
+            supervisor_email=request.supervisorEmail,
+            request_id=request.requestId
+        )
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"❌ Error in send leave card endpoint: {error}")
+        raise HTTPException(status_code=500, detail=str(error))
+
 # Webhook handler for incoming messages
 @app.api_route("/chat/webhook", methods=["GET", "POST"])
 async def webhook_handler(request: Request):
@@ -304,6 +437,17 @@ async def webhook_handler(request: Request):
         sender_email = sender_info.get("email")
         sender_type = sender_info.get("type")
         sender_display_name = sender_info.get("displayName", "")
+        
+        # Check if this is a card form submission
+        action_data = event.get("chat", {}).get("actionMethodName")
+        form_inputs = event.get("chat", {}).get("formInputs", {})
+        
+        if action_data == "SUBMIT_LEAVE_REQUEST" and form_inputs:
+            print("📝 Processing leave request card submission")
+            # Process in background
+            import asyncio
+            asyncio.create_task(process_leave_card_submission(space_name, form_inputs, sender_email, sender_display_name))
+            return response
         
         if not space_name or not message_text:
             print("⚠️ No space name or message text found in event")
@@ -337,8 +481,8 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         else:
             print(f"⚠️ No user context found for {sender_email}")
         
-        # Get response from Mira agent with user context
-        agent_response = main_agent(message_text, user_context)
+        # Get response from Mira agent with user context and space name
+        agent_response = main_agent(message_text, user_context, space_name)
         
         if agent_response:
             print(f"💬 Sending Mira response to {space_name}...")
@@ -374,6 +518,92 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         except Exception as send_error:
             print(f"❌ Failed to send error message: {send_error}")
 
+async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, Any], sender_email: str, sender_display_name: str = ""):
+    """Process leave request card form submission"""
+    try:
+        print(f"📝 Processing leave card submission from {sender_display_name} ({sender_email})")
+        
+        # Extract form data
+        start_date_input = form_inputs.get("start_date", {}).get("dateTimeInput", {})
+        end_date_input = form_inputs.get("end_date", {}).get("dateTimeInput", {})
+        leave_type_input = form_inputs.get("leave_type", {}).get("selectionInput", {})
+        reason_input = form_inputs.get("reason", {}).get("textInput", {})
+        
+        # Parse dates from epoch milliseconds
+        start_date_epoch = start_date_input.get("valueMsEpoch")
+        end_date_epoch = end_date_input.get("valueMsEpoch")
+        
+        if not start_date_epoch or not end_date_epoch:
+            print("❌ Missing date information in form submission")
+            return
+        
+        # Convert epoch to readable date format
+        import datetime
+        start_date = datetime.datetime.fromtimestamp(int(start_date_epoch) / 1000).strftime("%Y-%m-%d")
+        end_date = datetime.datetime.fromtimestamp(int(end_date_epoch) / 1000).strftime("%Y-%m-%d")
+        
+        # Extract other form data
+        leave_type = leave_type_input.get("value", "Annual")
+        reason = reason_input.get("value", "")
+        
+        # Get user context to find supervisor
+        user_context = get_user_context_from_db(sender_email, space_name)
+        if not user_context:
+            print(f"❌ No user context found for {sender_email}")
+            return
+        
+        supervisor_email = user_context.get("reporting_manager")
+        if not supervisor_email:
+            print(f"❌ No supervisor found for {sender_email}")
+            return
+        
+        # Create complete leave request payload
+        leave_payload = {
+            "employee_email": sender_email,
+            "leave_type": leave_type,
+            "start_date": start_date,
+            "end_date": end_date,
+            "reason": reason,
+            "supervisor_email": supervisor_email
+        }
+        
+        print(f"📋 Leave request data: {leave_payload}")
+        
+        # Send confirmation message
+        confirmation_message = f"✅ Leave request received!\n\n**Details:**\n- Employee: {sender_email}\n- Leave Type: {leave_type}\n- Start Date: {start_date}\n- End Date: {end_date}\n- Reason: {reason}\n- Supervisor: {supervisor_email}\n\nProcessing your request..."
+        
+        async with httpx.AsyncClient() as client:
+            await client.post(f"http://localhost:{PORT}/chat/send", json={
+                "spaceName": space_name,
+                "message": confirmation_message
+            })
+        
+        # Process the leave request through the HR agent
+        agent_response = main_agent(f"Process this leave request: {json.dumps(leave_payload)}", user_context, space_name)
+        
+        if agent_response:
+            print(f"💬 Sending HR agent response to {space_name}...")
+            async with httpx.AsyncClient() as client:
+                await client.post(f"http://localhost:{PORT}/chat/send", json={
+                    "spaceName": space_name,
+                    "message": agent_response
+                })
+        else:
+            print("❌ No response from HR agent")
+    
+    except Exception as error:
+        print(f"❌ Failed to process leave card submission: {error}")
+        
+        # Send error message
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(f"http://localhost:{PORT}/chat/send", json={
+                    "spaceName": space_name,
+                    "message": "I'm sorry, there was an error processing your leave request. Please try again."
+                })
+        except Exception as send_error:
+            print(f"❌ Failed to send error message: {send_error}")
+
 if __name__ == "__main__":
     import uvicorn
     
@@ -386,6 +616,7 @@ if __name__ == "__main__":
     print("   POST /chat/send               → Send message to space")
     print("   POST /chat/broadcast          → Broadcast to all spaces")
     print("   POST /chat/send-card          → Send rich card to space")
+    print("   POST /chat/send-leave-card    → Send interactive leave request card")
     print("   POST /chat/webhook            → Handle incoming messages")
     print("")
     print("💬 Mira is ready to help with:")

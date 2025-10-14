@@ -42,7 +42,7 @@ main_agent_executor = AgentExecutor(
 )
 
 
-def main_agent(user_prompt: str, user_context: Optional[Dict[str, Any]] = None) -> str:
+def main_agent(user_prompt: str, user_context: Optional[Dict[str, Any]] = None, space_name: Optional[str] = None) -> str:
     
     today_iso = datetime.now(timezone.utc).date().isoformat()
     
@@ -55,6 +55,10 @@ def main_agent(user_prompt: str, user_context: Optional[Dict[str, Any]] = None) 
         context_str = format_user_context_for_prompt(user_context)
         if context_str:
             full_prompt = f"{context_str}\n\n{full_prompt}"
+    
+    # Add space name context if available
+    if space_name:
+        full_prompt = f"Space: {space_name}\n\n{full_prompt}"
 
     # Get the response from the agent executor
     response = main_agent_executor.invoke({"input": full_prompt})
