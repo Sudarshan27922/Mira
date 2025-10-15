@@ -1,3 +1,4 @@
+from multiprocessing import util
 from langchain_core.tools import tool
 from langchain.tools.base import StructuredTool
 from typing import Dict
@@ -5,6 +6,7 @@ from typing import Dict
 from .sub_agents.hr.agent import get_hr_agent_executor
 from .sub_agents.it.agent import get_it_agent_executor
 from .sub_agents.rm.agent import get_rm_agent_executor
+from .sub_agents.sql.agent import get_sql_agent_executor
 from .rag_tool import RAG_TOOLS
 
 
@@ -40,5 +42,11 @@ RM_Agent = _make_agent_tool(
     executor_factory=get_rm_agent_executor,
 )
 
+SQL_Agent = _make_agent_tool(
+    name="SQL_Agent",
+    description="Answer database-related questions by generating and executing read-only SQL (SELECT/WITH/EXPLAIN) on PostgreSQL. Input is the user's request.",
+    executor_factory=get_sql_agent_executor,
+)
+
 # Combine sub-agent tools with RAG tools
-TOOLS = [HR_Agent, IT_Agent, RM_Agent] + RAG_TOOLS
+TOOLS = [HR_Agent, IT_Agent, RM_Agent, SQL_Agent] + RAG_TOOLS
