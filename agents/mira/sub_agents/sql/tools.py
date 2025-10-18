@@ -52,10 +52,8 @@ def execute_sql_query(sql: str) -> str:
         return f"SQL execution failed: {e}"
 
 @tool("list_public_tables")
-def list_public_tables(_: str = "") -> str:
-    """
-    List tables in the public schema. Input ignored.
-    """
+def list_public_tables() -> dict:
+    """List public tables in the configured database."""
     try:
         eng = _get_engine()
         with eng.connect() as conn:
@@ -71,9 +69,9 @@ def list_public_tables(_: str = "") -> str:
             )
             rows = result.fetchall()
             data: List[Dict[str, Any]] = [dict(r._mapping) for r in rows]
-        return json.dumps(data, default=str)
+        return {"tables": data}
     except Exception as e:
-        return f"Schema inspection failed: {e}"
+        return {"error": f"Schema inspection failed: {e}"}
 
 @tool("describe_table_columns")
 def describe_table_columns(table_name: str) -> str:
