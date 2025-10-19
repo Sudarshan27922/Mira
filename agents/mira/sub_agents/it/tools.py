@@ -1,70 +1,59 @@
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+try:
+    from langchain.tools import StructuredTool
+except Exception:
+    from langchain_core.tools import StructuredTool
 from langchain_core.tools import tool
+
 from .jira_service import JiraService
+from agents.config.jira_config import JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
 
-@tool
-def diagnose_connectivity(issue_description: str) -> Dict[str, Any]:
-    """Suggest initial steps for network connectivity issues. Stub tool."""
-    return {"steps": ["Check Wi-Fi connection", "Restart router", "Run ping test"]}
+# Single Jira client
+svc = JiraService(JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY)
 
-@tool
-def create_it_access_request(
-    product_name: str,
-    justification: Optional[str] = None,
-    urgency: Optional[str] = "medium",
-    requester_email: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Create a Jira Service Management customer request for application access (e.g., Lucidchart license).
-    - product_name: The software or system (e.g., 'Lucidchart').
-    - justification: Why access is needed.
-    - urgency: low | medium | high | critical (passed in description).
-    - requester_email: Employee email; falls back to JIRA_DEFAULT_REQUESTER_EMAIL if unset.
-    Returns issueKey, links, and initial status context.
-    """
-    svc = JiraService()
-    summary = f"Access request: {product_name}"
-    desc_lines = [
-        f"Product: {product_name}",
-        f"Urgency: {urgency or 'medium'}",
-        f"Justification: {justification or 'Not provided'}",
-    ]
-    description = "\n".join(desc_lines)
-
-    result = svc.create_customer_request(
+def _create_jira_ticket(
+    summary: str,
+    description: Optional[str] = None,
+    issue_type: str = "Service Request",
+    priority: Optional[str] = None,
+    labels: Optional[List[str]] = None,
+    custom_fields: Optional[Dict[str, Any]] = None,
+) -> str:
+    desc = description or summary
+    return svc.create_ticket(
         summary=summary,
-        description=description,
-        requester_email=requester_email,
+        description=desc,
+        issue_type=issue_type,
+        priority=priority,
+        labels=labels,
+        custom_fields=custom_fields,
     )
-    # Fetch status right away for user feedback
-    status = {}
-    try:
-        status = svc.get_request_status(result["issueKey"])
-    except Exception:
-        status = {}
 
-    return {
-        "message": f"Created request for {product_name}.",
-        "issueKey": result.get("issueKey"),
-        "issueId": result.get("issueId"),
-        "status": status.get("status"),
-        "links": {"portal": result.get("web"), "api": result.get("self")},
-    }
+class CreateJiraTicketInput(BaseModel):
+    summary: str = Field(..., description="One-line summary.")
+    description: Optional[str] = Field(None, description="Full description.")
+    issue_type: str = Field("Service Request", description="Issue type name (will be resolved).")
+    priority: Optional[str] = Field(None, description="Low, Medium, High, Critical.")
+    labels: Optional[List[str]] = Field(None, description="Labels.")
+    custom_fields: Optional[Dict[str, Any]] = Field(
+        None, description="Logical custom fields: product, requested_for, location, approver, due_date (yyyy-MM-dd or natural language), intent."
+    )
+
+create_jira_ticket = StructuredTool.from_function(
+    name="create_jira_ticket",
+    description="Create a Jira ticket for any IT request (hardware, software, account, network, incidents).",
+    func=_create_jira_ticket,
+    args_schema=CreateJiraTicketInput,
+)
 
 @tool
 def get_it_request_status(issue_key: str) -> Dict[str, Any]:
-    """
-    Get the latest status of a Jira Service Management request by issue key (e.g., ITSM-123).
-    """
-    svc = JiraService()
-    data = svc.get_request_status(issue_key)
-    return {
-        "issueKey": data.get("issueKey"),
-        "status": data.get("status"),
-        "summary": data.get("summary"),
-        "links": {"portal": data.get("web")},
-    }
+    """Get the workflow status of a Jira issue by key (e.g., ITSD-123)."""
+    return svc.get_request_status(issue_key)
 
-IT_TOOLS = [diagnose_connectivity, create_it_access_request, get_it_request_status]
+IT_TOOLS = [create_jira_ticket, get_it_request_status]
+__all__ = ["create_jira_ticket", "get_it_request_status", "IT_TOOLS"]
 
 

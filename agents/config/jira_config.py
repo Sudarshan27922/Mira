@@ -1,33 +1,58 @@
 import os
-from dataclasses import dataclass
-from typing import Optional
-import requests
-from requests.auth import HTTPBasicAuth
+from pathlib import Path
 
-@dataclass
-class JiraSettings:
-    base_url: str
-    email: str
-    api_token: str
-    service_desk_id: Optional[str] = None
-    request_type_id: Optional[str] = None
-    default_requester_email: Optional[str] = None
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None  # optional
 
-    @staticmethod
-    def from_env() -> "JiraSettings":
-        return JiraSettings(
-            base_url=os.getenv("JIRA_CLOUD_BASE_URL", "").rstrip("/"),
-            email=os.getenv("JIRA_EMAIL", ""),
-            api_token=os.getenv("JIRA_API_TOKEN", ""),
-            service_desk_id=os.getenv("JIRA_SERVICE_DESK_ID", None),
-            request_type_id=os.getenv("JIRA_REQUEST_TYPE_ID", None),
-            default_requester_email=os.getenv("JIRA_DEFAULT_REQUESTER_EMAIL", None),
-        )
+def _load_env():
+    if load_dotenv:
+        here = Path(__file__).resolve()
+        for parent in [here.parent, *here.parents]:
+            env_path = parent / ".env"
+            if env_path.exists():
+                load_dotenv(dotenv_path=env_path, override=False)
+                break
 
-def build_jira_session(settings: JiraSettings) -> requests.Session:
-    if not settings.base_url or not settings.email or not settings.api_token:
-        raise ValueError("Missing Jira credentials. Set JIRA_CLOUD_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN.")
-    s = requests.Session()
-    s.auth = HTTPBasicAuth(settings.email, settings.api_token)
-    s.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
-    return s
+_load_env()
+
+def _norm_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value.rstrip("/")
+
+# Required (with fallbacks)
+JIRA_BASE_URL = _norm_url(
+    os.getenv("JIRA_BASE_URL")
+    or os.getenv("JIRA_CLOUD_BASE_URL")
+    or os.getenv("JIRA_DOMAIN")
+)
+JIRA_EMAIL = os.getenv("JIRA_EMAIL")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN") or os.getenv("JIRA_API_KEY")
+JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY")
+
+# Optional
+JIRA_ISSUE_TYPE_NAME = os.getenv("JIRA_ISSUE_TYPE_NAME", "Service Request")
+JIRA_ISSUE_TYPE_ID = os.getenv("JIRA_ISSUE_TYPE_ID")
+JIRA_CF_PRODUCT = os.getenv("JIRA_CF_PRODUCT")
+JIRA_CF_REQUESTED_FOR = os.getenv("JIRA_CF_REQUESTED_FOR")
+JIRA_CF_LOCATION = os.getenv("JIRA_CF_LOCATION")
+JIRA_CF_APPROVER = os.getenv("JIRA_CF_APPROVER")
+JIRA_CF_INTENT = os.getenv("JIRA_CF_INTENT")
+JIRA_DEBUG = os.getenv("JIRA_DEBUG", "0")
+
+__all__ = [
+    "JIRA_BASE_URL",
+    "JIRA_EMAIL",
+    "JIRA_API_TOKEN",
+    "JIRA_PROJECT_KEY",
+    "JIRA_ISSUE_TYPE_NAME",
+    "JIRA_ISSUE_TYPE_ID",
+    "JIRA_CF_PRODUCT",
+    "JIRA_CF_REQUESTED_FOR",
+    "JIRA_CF_LOCATION",
+    "JIRA_CF_APPROVER",
+    "JIRA_CF_INTENT",
+    "JIRA_DEBUG",
+]
