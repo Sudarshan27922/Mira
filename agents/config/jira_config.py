@@ -52,6 +52,9 @@ JIRA_CF_INTENT = os.getenv("JIRA_CF_INTENT")
 
 JIRA_DEBUG = os.getenv("JIRA_DEBUG", "0")
 
+# New: who to assign issues to (defaults to the Jira API user)
+MIRA_ASSIGNEE_EMAIL = os.getenv("MIRA_ASSIGNEE_EMAIL") or JIRA_EMAIL
+
 __all__ = [
     "JIRA_BASE_URL",
     "JIRA_EMAIL",
@@ -70,4 +73,5 @@ __all__ = [
     "JIRA_CF_APPROVER",
     "JIRA_CF_INTENT",
     "JIRA_DEBUG",
+    "MIRA_ASSIGNEE_EMAIL",
 ]

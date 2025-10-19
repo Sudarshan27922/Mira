@@ -3,6 +3,7 @@ import json
 import re
 from datetime import date, datetime
 import requests
+from urllib.parse import quote
 
 from agents.config.jira_config import (
     JIRA_BASE_URL,
@@ -19,7 +20,10 @@ from agents.config.jira_config import (
     JIRA_DEBUG,
     JIRA_USE_SERVICE_DESK,
     JIRA_SERVICE_DESK_ID,
-    JIRA_REQUEST_TYPE_ID_MAP,  # optional JSON, not required
+    JIRA_REQUEST_TYPE_ID,          # optional
+    JIRA_REQUEST_TYPE_ID_HARDWARE, # optional
+    JIRA_REQUEST_TYPE_ID_MAP,      # optional
+    MIRA_ASSIGNEE_EMAIL,
 )
 
 # Your static request type name -> id mapping
@@ -94,6 +98,100 @@ class JiraService:
 
     def _auth(self):
         return (self.email, self.api_token)
+
+    # --- Account resolution helpers ---
+
+    def _search_agent_account_id_by_email(self, email: str) -> Optional[str]:
+        """Search Jira users (agents) by email; returns accountId."""
+        if not email:
+            return None
+        url = f"{self.base_url}/rest/api/3/user/search?query={requests.utils.quote(email)}"
+        resp = requests.get(url, auth=self._auth(), headers=self._headers(), timeout=30)
+        if not resp.ok:
+            return None
+        for u in resp.json() or []:
+            if str(u.get("emailAddress", "")).lower() == email.lower() or email.lower() in str(u.get("displayName", "")).lower():
+                return u.get("accountId")
+        # fallback to first match
+        arr = resp.json() or []
+        return arr[0].get("accountId") if arr else None
+
+    def _search_customer_account_id_by_email(self, email: str) -> Optional[str]:
+        """Search JSM customers by email; returns accountId."""
+        if not email:
+            return None
+
+        # 1) Global JSM customer directory
+        try:
+            url = f"{self.base_url}/rest/servicedeskapi/customer?query={quote(email)}"
+            resp = requests.get(url, auth=self._auth(), headers=self._headers(), timeout=30)
+            if resp.ok:
+                for c in (resp.json() or {}).get("values", []) or []:
+                    if str(c.get("emailAddress", "")).lower() == email.lower():
+                        return c.get("accountId")
+        except Exception:
+            pass
+
+        # 2) Service desk-specific customer directory
+        try:
+            if self.service_desk_id:
+                url = f"{self.base_url}/rest/servicedeskapi/servicedesk/{self.service_desk_id}/customer?query={quote(email)}"
+                resp = requests.get(url, auth=self._auth(), headers=self._headers(), timeout=30)
+                if resp.ok:
+                    for c in (resp.json() or {}).get("values", []) or []:
+                        if str(c.get("emailAddress", "")).lower() == email.lower():
+                            return c.get("accountId")
+        except Exception:
+            pass
+
+        # 3) Core user search (agents) fallback
+        try:
+            url = f"{self.base_url}/rest/api/3/user/search?query={quote(email)}"
+            resp = requests.get(url, auth=self._auth(), headers=self._headers(), timeout=30)
+            if resp.ok:
+                arr = resp.json() or []
+                for u in arr:
+                    if str(u.get("emailAddress", "")).lower() == email.lower():
+                        return u.get("accountId")
+                if arr:
+                    return arr[0].get("accountId")
+        except Exception:
+            pass
+
+        return None
+
+    def _ensure_customer_account_id(self, email: str) -> Optional[str]:
+        """Return accountId for a customer; create customer if not found (if permitted)."""
+        acc = self._search_customer_account_id_by_email(email)
+        if acc:
+            return acc
+
+        # Try create; if 400 (already exists), re-search and return
+        url = f"{self.base_url}/rest/servicedeskapi/customer"
+        payload = {"email": email, "fullName": email.split("@")[0]}
+        resp = requests.post(url, json=payload, auth=self._auth(), headers=self._headers(), timeout=30)
+        if not resp.ok:
+            if JIRA_DEBUG == "1":
+                try:
+                    print("Create customer failed:", resp.status_code, resp.text)
+                except Exception:
+                    pass
+            # If already exists, a follow-up search usually finds it
+            acc = self._search_customer_account_id_by_email(email)
+            return acc
+        data = resp.json() or {}
+        return data.get("accountId")
+
+    def _ensure_customer_in_service_desk(self, service_desk_id: str, account_id: str) -> None:
+        """Add the customer to the service desk if needed (idempotent)."""
+        if not (service_desk_id and account_id):
+            return
+        url = f"{self.base_url}/rest/servicedeskapi/servicedesk/{service_desk_id}/customer"
+        payload = {"accountIds": [account_id]}
+        resp = requests.post(url, json=payload, auth=self._auth(), headers=self._headers(), timeout=30)
+        # 204/200 on success; ignore 400 "already a customer"
+        if JIRA_DEBUG == "1" and not (200 <= resp.status_code < 300):
+            print("Add customer to SD result:", resp.status_code, resp.text)
 
     def _get_createmeta(self) -> Dict[str, Any]:
         if self._createmeta_cache:
@@ -192,7 +290,14 @@ class JiraService:
         # Ensure we still create a customer request with a safe default
         return DEFAULT_REQUEST_TYPE_NAME_TO_ID.get("get it help")
 
-    def _create_customer_request(self, summary: str, description: Optional[str], request_type_id: str, service_desk_id: str) -> str:
+    def _create_customer_request(
+        self,
+        summary: str,
+        description: Optional[str],
+        request_type_id: str,
+        service_desk_id: str,
+        reporter_account_id: Optional[str] = None,
+    ) -> str:
         url = f"{self.base_url}/rest/servicedeskapi/request"
         payload = {
             "serviceDeskId": str(service_desk_id),
@@ -202,6 +307,8 @@ class JiraService:
                 "description": description or summary,
             },
         }
+        if reporter_account_id:
+            payload["raiseOnBehalfOf"] = reporter_account_id
         headers = {**self._headers(), "X-ExperimentalApi": "opt-in"}
         if JIRA_DEBUG == "1":
             print("Create Customer Request Payload:", json.dumps(payload, indent=2))
@@ -215,17 +322,81 @@ class JiraService:
         data = resp.json()
         return data.get("issueKey") or data.get("key") or str(data.get("requestId"))
 
-    def create_ticket(self, summary: str, description: Optional[str] = None, issue_type: str = "Service Request", priority: Optional[str] = None, labels: Optional[List[str]] = None, custom_fields: Optional[Dict[str, Any]] = None) -> str:
-        # Always create via Service Desk when enabled so "Request Type" is set
-        if self.use_sd and self.service_desk_id:
-            rt_id = self._pick_request_type_id(summary, description, labels, custom_fields) or self._fallback_request_type_id()
-            if not rt_id:
-                raise ValueError("Unable to resolve a Service Desk requestTypeId. Provide custom_fields.request_type_name or configure the static name->id map.")
-            if JIRA_DEBUG == "1":
-                print(f"Using Service Desk requestTypeId={rt_id}")
-            return self._create_customer_request(summary, description or summary, rt_id, self.service_desk_id)
+    def _assign_issue(self, issue_key: str, assignee_account_id: Optional[str]) -> None:
+        if not assignee_account_id:
+            return
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/assignee"
+        resp = requests.put(url, json={"accountId": assignee_account_id}, auth=self._auth(), headers=self._headers(), timeout=30)
+        if JIRA_DEBUG == "1" and not resp.ok:
+            try:
+                print("Assign Error:", resp.status_code, resp.text)
+            except Exception:
+                pass
+        resp.raise_for_status()
 
-        # Fallback to core API (will NOT set Request Type)
+    def _update_issue_reporter(self, issue_key: str, reporter_account_id: Optional[str]) -> None:
+        """Force Reporter via core API (fallback if raiseOnBehalfOf didn’t apply)."""
+        if not (issue_key and reporter_account_id):
+            return
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}"
+        payload = {"fields": {"reporter": {"accountId": reporter_account_id}}}
+        resp = requests.put(url, json=payload, auth=self._auth(), headers=self._headers(), timeout=30)
+        if JIRA_DEBUG == "1" and not (200 <= resp.status_code < 300):
+            print("Update reporter result:", resp.status_code, resp.text)
+
+    def create_ticket(
+        self,
+        summary: str,
+        description: Optional[str] = None,
+        issue_type: str = "Service Request",
+        priority: Optional[str] = None,
+        labels: Optional[List[str]] = None,
+        custom_fields: Optional[Dict[str, Any]] = None,
+        reporter_email: Optional[str] = None,
+        assignee_email: Optional[str] = None,
+    ) -> str:
+        reporter_email = reporter_email or (custom_fields or {}).get("reporter_email") or (custom_fields or {}).get("requested_for")
+        assignee_email = assignee_email or MIRA_ASSIGNEE_EMAIL
+
+        if self.use_sd and self.service_desk_id:
+            reporter_acc = None
+            if reporter_email:
+                reporter_acc = self._ensure_customer_account_id(reporter_email)
+                try:
+                    if reporter_acc:
+                        self._ensure_customer_in_service_desk(self.service_desk_id, reporter_acc)
+                except Exception as e:
+                    if JIRA_DEBUG == "1":
+                        print("Ensure customer in SD failed:", e)
+
+            rt_id = self._pick_request_type_id(summary, description, labels, custom_fields) or DEFAULT_REQUEST_TYPE_NAME_TO_ID.get("get it help")
+            if not rt_id:
+                raise ValueError("Unable to resolve a Service Desk requestTypeId.")
+            if JIRA_DEBUG == "1":
+                print(f"Using Service Desk requestTypeId={rt_id}, reporter={reporter_email}, reporter_acc={reporter_acc}")
+
+            key = self._create_customer_request(summary, description or summary, rt_id, self.service_desk_id, reporter_account_id=reporter_acc)
+
+            # Fallback: force Reporter if raiseOnBehalfOf didn’t apply
+            try:
+                if reporter_acc:
+                    self._update_issue_reporter(key, reporter_acc)
+            except Exception as e:
+                if JIRA_DEBUG == "1":
+                    print("Reporter update failed:", e)
+
+            # Assign to Mira (unchanged)
+            if assignee_email:
+                acc = self._search_agent_account_id_by_email(assignee_email)
+                if acc:
+                    try:
+                        self._assign_issue(key, acc)
+                    except Exception as e:
+                        if JIRA_DEBUG == "1":
+                            print("Assignee update failed:", e)
+            return key
+
+        # Fallback (core API)
         issuetype_obj = self._resolve_issue_type(issue_type)
         fields: Dict[str, Any] = {
             "project": {"key": self.project_key},
@@ -240,13 +411,21 @@ class JiraService:
             if lbls:
                 fields["labels"] = lbls
 
+        # reporter/assignee via core API (accountId required)
+        if reporter_email:
+            acc = self._search_agent_account_id_by_email(reporter_email) or self._search_customer_account_id_by_email(reporter_email)
+            if acc:
+                fields["reporter"] = {"accountId": acc}
+        if assignee_email:
+            acc = self._search_agent_account_id_by_email(assignee_email)
+            if acc:
+                fields["assignee"] = {"accountId": acc}
+
+        # due date and custom fields
         if custom_fields and custom_fields.get("due_date"):
             due_norm = _normalize_due_date(custom_fields.get("due_date"))
             if due_norm:
                 fields["duedate"] = due_norm
-            elif JIRA_DEBUG == "1":
-                print(f"Skipping invalid due_date: {custom_fields.get('due_date')!r}")
-
         if custom_fields:
             for logical_name, value in custom_fields.items():
                 if value in (None, "", []):
@@ -258,30 +437,10 @@ class JiraService:
         payload = {"fields": fields}
         if JIRA_DEBUG == "1":
             print("Create Issue Payload:", json.dumps(payload, indent=2))
-
-        resp = requests.post(
-            f"{self.base_url}/rest/api/3/issue",
-            json=payload,
-            auth=self._auth(),
-            headers=self._headers(),
-            timeout=30,
-        )
-        if JIRA_DEBUG == "1" and not resp.ok:
-            try:
-                print("Create Issue Error:", resp.status_code, json.dumps(resp.json(), indent=2))
-            except Exception:
-                print("Create Issue Error Text:", resp.text)
-
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
-            try:
-                details = resp.json()
-            except Exception:
-                details = resp.text
-            raise requests.HTTPError(f"Jira issue create failed: {e} | details={details}") from e
-
-        return resp.json()["key"]
+        resp = requests.post(f"{self.base_url}/rest/api/3/issue", json=payload, auth=self._auth(), headers=self._headers(), timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["key"]
 
     def get_issue_status(self, issue_id_or_key: str) -> Dict[str, Any]:
         url = f"{self.base_url}/rest/api/3/issue/{issue_id_or_key}?fields=status"
