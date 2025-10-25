@@ -161,3 +161,4 @@ wheels/
 .installed.cfg
 *.egg
 server/service-account-key.json
+/venv
