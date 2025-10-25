@@ -33,7 +33,7 @@ def record_leave_request(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @tool
-def leave_process_workflow(payload: Dict[str, Any], space_name: str = None) -> Dict[str, Any]:
+def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dict[str, Any]:
     """Composite workflow: validate -> check conflicts -> (maybe) request decision -> approval -> finalize.
 
     This is a stubbed synchronous version; later replace with LangGraph and persistence.
