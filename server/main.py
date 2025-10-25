@@ -220,7 +220,7 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
         raise HTTPException(status_code=500, detail="Google Chat service not initialized")
     
     try:
-        # Build an interactive card with form input widgets
+        # Build a card with structured input fields using textParagraph and buttons
         card = {
             "cards": [{
                 "header": {
@@ -231,57 +231,24 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                     "widgets": [
                         {
                             "textParagraph": {
-                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please fill in your leave details:"
+                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please provide your leave details in the following format:"
                             }
                         }
                     ]
                 }, {
                     "widgets": [
                         {
-                            "selectionInput": {
-                                "name": "leave_type",
-                                "label": "Leave Type",
-                                "type": "DROPDOWN",
-                                "items": [
-                                    {"text": "Annual Leave", "value": "Annual"},
-                                    {"text": "Sick Leave", "value": "Sick"},
-                                    {"text": "Personal Leave", "value": "Personal"},
-                                    {"text": "Medical Leave", "value": "Medical"},
-                                    {"text": "Other", "value": "Other"}
-                                ]
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "name": "start_date",
-                                "label": "Start Date (YYYY-MM-DD)",
-                                "type": "SINGLE_LINE",
-                                "hint": "e.g., 2024-01-15"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "name": "end_date",
-                                "label": "End Date (YYYY-MM-DD)",
-                                "type": "SINGLE_LINE",
-                                "hint": "e.g., 2024-01-20"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "name": "reason",
-                                "label": "Reason for Leave",
-                                "type": "MULTIPLE_LINE",
-                                "hint": "Brief description of your leave request"
+                            "textParagraph": {
+                                "text": "<b>📋 Leave Request Format:</b><br><br>" +
+                                       "<b>Leave Type:</b> Annual, Sick, Personal, Medical, or Other<br>" +
+                                       "<b>Start Date:</b> YYYY-MM-DD (e.g., 2024-01-15)<br>" +
+                                       "<b>End Date:</b> YYYY-MM-DD (e.g., 2024-01-20)<br>" +
+                                       "<b>Reason:</b> Brief description of your leave request<br><br>" +
+                                       "<b>Example:</b><br>" +
+                                       "Leave Type: Annual<br>" +
+                                       "Start Date: 2024-01-15<br>" +
+                                       "End Date: 2024-01-20<br>" +
+                                       "Reason: Family vacation"
                             }
                         }
                     ]
@@ -290,7 +257,7 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                         {
                             "buttons": [{
                                 "textButton": {
-                                    "text": "✅ Submit Leave Request",
+                                    "text": "📝 Submit Leave Details",
                                     "onClick": {
                                         "action": {
                                             "actionMethodName": "SUBMIT_LEAVE_REQUEST",
