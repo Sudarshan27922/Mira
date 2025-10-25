@@ -220,7 +220,7 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
         raise HTTPException(status_code=500, detail="Google Chat service not initialized")
     
     try:
-        # Build the interactive card structure with correct Google Chat widgets
+        # Build a simple card structure with only basic widgets
         card = {
             "cards": [{
                 "header": {
@@ -231,47 +231,15 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                     "widgets": [
                         {
                             "textParagraph": {
-                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please fill in your leave details:"
+                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please provide your leave details:"
                             }
                         }
                     ]
                 }, {
                     "widgets": [
                         {
-                            "textInput": {
-                                "label": "Start Date (YYYY-MM-DD)",
-                                "name": "start_date",
-                                "placeholder": "e.g., 2024-01-15"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "label": "End Date (YYYY-MM-DD)", 
-                                "name": "end_date",
-                                "placeholder": "e.g., 2024-01-20"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "label": "Leave Type",
-                                "name": "leave_type",
-                                "placeholder": "Annual, Sick, Personal, Other"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "label": "Reason for Leave",
-                                "name": "reason",
-                                "placeholder": "Please provide a brief reason for your leave request..."
+                            "textParagraph": {
+                                "text": "<b>Instructions:</b><br>• Start Date: YYYY-MM-DD format (e.g., 2024-01-15)<br>• End Date: YYYY-MM-DD format (e.g., 2024-01-20)<br>• Leave Type: Annual, Sick, Personal, or Other<br>• Reason: Brief description of your leave request"
                             }
                         }
                     ]
@@ -280,7 +248,22 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                         {
                             "buttons": [{
                                 "textButton": {
-                                    "text": "Submit Leave Request",
+                                    "text": "📝 Fill Leave Details",
+                                    "onClick": {
+                                        "openLink": {
+                                            "url": f"https://forms.gle/placeholder?request_id={request_id}&employee={employee_email}&supervisor={supervisor_email}"
+                                        }
+                                    }
+                                }
+                            }]
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "buttons": [{
+                                "textButton": {
+                                    "text": "✅ Submit via Chat",
                                     "onClick": {
                                         "action": {
                                             "actionMethodName": "SUBMIT_LEAVE_REQUEST",
@@ -433,7 +416,7 @@ async def webhook_handler(request: Request):
         action_data = event.get("chat", {}).get("actionMethodName")
         form_inputs = event.get("chat", {}).get("formInputs", {})
         
-        if action_data == "SUBMIT_LEAVE_REQUEST" and form_inputs:
+        if action_data == "SUBMIT_LEAVE_REQUEST":
             print("📝 Processing leave request card submission")
             # Process in background
             import asyncio
@@ -512,68 +495,33 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
 async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, Any], sender_email: str, sender_display_name: str = ""):
     """Process leave request card form submission"""
     try:
-        print(f"📝 Processing leave card submission from {sender_display_name} ({sender_email})")
+        print(f"📝 Processing leave request card submission from {sender_display_name} ({sender_email})")
         
-        # Extract form data from text inputs
-        start_date_input = form_inputs.get("start_date", {}).get("textInput", {})
-        end_date_input = form_inputs.get("end_date", {}).get("textInput", {})
-        leave_type_input = form_inputs.get("leave_type", {}).get("textInput", {})
-        reason_input = form_inputs.get("reason", {}).get("textInput", {})
-        
-        # Extract text values
-        start_date = start_date_input.get("value", "")
-        end_date = end_date_input.get("value", "")
-        leave_type = leave_type_input.get("value", "Annual")
-        reason = reason_input.get("value", "")
-        
-        if not start_date or not end_date:
-            print("❌ Missing date information in form submission")
-            return
-        
-        # Get user context to find supervisor
-        user_context = get_user_context_from_db(sender_email, space_name)
-        if not user_context:
-            print(f"❌ No user context found for {sender_email}")
-            return
-        
-        supervisor_email = user_context.get("manager_email")
-        if not supervisor_email:
-            print(f"❌ No manager found for {sender_email}")
-            return
-        
-        # Create complete leave request payload
-        leave_payload = {
-            "employee_email": sender_email,
-            "leave_type": leave_type,
-            "start_date": start_date,
-            "end_date": end_date,
-            "reason": reason,
-            "supervisor_email": supervisor_email
-        }
-        
-        print(f"📋 Leave request data: {leave_payload}")
-        
-        # Send confirmation message
-        confirmation_message = f"✅ Leave request received!\n\n**Details:**\n- Employee: {sender_email}\n- Leave Type: {leave_type}\n- Start Date: {start_date}\n- End Date: {end_date}\n- Reason: {reason}\n- Supervisor: {supervisor_email}\n\nProcessing your request..."
+        # Send instructions for providing leave details
+        instructions_message = """📝 **Leave Request Details Required**
+
+Please provide your leave details in the following format:
+
+**Start Date:** YYYY-MM-DD (e.g., 2024-01-15)
+**End Date:** YYYY-MM-DD (e.g., 2024-01-20)  
+**Leave Type:** Annual, Sick, Personal, or Other
+**Reason:** Brief description of your leave request
+
+Example:
+```
+Start Date: 2024-01-15
+End Date: 2024-01-20
+Leave Type: Annual
+Reason: Family vacation
+```
+
+Please send your leave details in this format."""
         
         async with httpx.AsyncClient() as client:
             await client.post(f"http://localhost:{PORT}/chat/send", json={
                 "spaceName": space_name,
-                "message": confirmation_message
+                "message": instructions_message
             })
-        
-        # Process the leave request through the HR agent
-        agent_response = main_agent(f"Process this leave request: {json.dumps(leave_payload)}", user_context, space_name)
-        
-        if agent_response:
-            print(f"💬 Sending HR agent response to {space_name}...")
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": agent_response
-                })
-        else:
-            print("❌ No response from HR agent")
     
     except Exception as error:
         print(f"❌ Failed to process leave card submission: {error}")
