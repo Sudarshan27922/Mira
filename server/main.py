@@ -669,9 +669,6 @@ Your leave request has been submitted and will be processed by your supervisor."
         
         # Process the leave request through the main agent
         try:
-            # Import here to avoid circular imports
-            from agents.mira.mira import main_agent
-            
             # Create a prompt that includes the space name and complete leave data
             prompt = f"""Space: {space_name}
 
@@ -685,13 +682,10 @@ User: I want to apply for leave with the following details:
 Please process this leave request."""
             
             # Get user context
-            user_context = get_user_context_from_db(sender_email)
+            user_context = get_user_context_from_db(sender_email, space_name)
             
             # Process through main agent
-            response = main_agent.invoke({
-                "messages": [("user", prompt)],
-                "user_context": user_context
-            })
+            response = main_agent(prompt, user_context, space_name)
             
             print(f"📝 Main agent response: {response}")
             
