@@ -220,7 +220,7 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
         raise HTTPException(status_code=500, detail="Google Chat service not initialized")
     
     try:
-        # Build the interactive card structure with form widgets
+        # Build the interactive card structure with correct Google Chat widgets
         card = {
             "cards": [{
                 "header": {
@@ -238,38 +238,30 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                 }, {
                     "widgets": [
                         {
-                            "dateTimePicker": {
-                                "label": "Start Date",
-                                "type": "DATE_AND_TIME",
-                                "valueMsEpoch": str(int(__import__('time').time() * 1000)),
-                                "name": "start_date"
+                            "textInput": {
+                                "label": "Start Date (YYYY-MM-DD)",
+                                "name": "start_date",
+                                "placeholder": "e.g., 2024-01-15"
                             }
                         }
                     ]
                 }, {
                     "widgets": [
                         {
-                            "dateTimePicker": {
-                                "label": "End Date", 
-                                "type": "DATE_AND_TIME",
-                                "valueMsEpoch": str(int(__import__('time').time() * 1000)),
-                                "name": "end_date"
+                            "textInput": {
+                                "label": "End Date (YYYY-MM-DD)", 
+                                "name": "end_date",
+                                "placeholder": "e.g., 2024-01-20"
                             }
                         }
                     ]
                 }, {
                     "widgets": [
                         {
-                            "selectionInput": {
-                                "type": "DROPDOWN",
+                            "textInput": {
                                 "label": "Leave Type",
                                 "name": "leave_type",
-                                "items": [
-                                    {"text": "Annual Leave", "value": "Annual"},
-                                    {"text": "Sick Leave", "value": "Sick"},
-                                    {"text": "Personal Leave", "value": "Personal"},
-                                    {"text": "Other", "value": "Other"}
-                                ]
+                                "placeholder": "Annual, Sick, Personal, Other"
                             }
                         }
                     ]
@@ -278,7 +270,6 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                         {
                             "textInput": {
                                 "label": "Reason for Leave",
-                                "type": "MULTIPLE_LINE",
                                 "name": "reason",
                                 "placeholder": "Please provide a brief reason for your leave request..."
                             }
@@ -523,28 +514,21 @@ async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, 
     try:
         print(f"📝 Processing leave card submission from {sender_display_name} ({sender_email})")
         
-        # Extract form data
-        start_date_input = form_inputs.get("start_date", {}).get("dateTimeInput", {})
-        end_date_input = form_inputs.get("end_date", {}).get("dateTimeInput", {})
-        leave_type_input = form_inputs.get("leave_type", {}).get("selectionInput", {})
+        # Extract form data from text inputs
+        start_date_input = form_inputs.get("start_date", {}).get("textInput", {})
+        end_date_input = form_inputs.get("end_date", {}).get("textInput", {})
+        leave_type_input = form_inputs.get("leave_type", {}).get("textInput", {})
         reason_input = form_inputs.get("reason", {}).get("textInput", {})
         
-        # Parse dates from epoch milliseconds
-        start_date_epoch = start_date_input.get("valueMsEpoch")
-        end_date_epoch = end_date_input.get("valueMsEpoch")
-        
-        if not start_date_epoch or not end_date_epoch:
-            print("❌ Missing date information in form submission")
-            return
-        
-        # Convert epoch to readable date format
-        import datetime
-        start_date = datetime.datetime.fromtimestamp(int(start_date_epoch) / 1000).strftime("%Y-%m-%d")
-        end_date = datetime.datetime.fromtimestamp(int(end_date_epoch) / 1000).strftime("%Y-%m-%d")
-        
-        # Extract other form data
+        # Extract text values
+        start_date = start_date_input.get("value", "")
+        end_date = end_date_input.get("value", "")
         leave_type = leave_type_input.get("value", "Annual")
         reason = reason_input.get("value", "")
+        
+        if not start_date or not end_date:
+            print("❌ Missing date information in form submission")
+            return
         
         # Get user context to find supervisor
         user_context = get_user_context_from_db(sender_email, space_name)
