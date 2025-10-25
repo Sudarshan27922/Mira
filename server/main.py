@@ -220,7 +220,7 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
         raise HTTPException(status_code=500, detail="Google Chat service not initialized")
     
     try:
-        # Build an interactive card with form input widgets
+        # Build a card with structured input fields using textParagraph and buttons
         card = {
             "cards": [{
                 "header": {
@@ -231,57 +231,24 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                     "widgets": [
                         {
                             "textParagraph": {
-                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please fill in your leave details:"
+                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please provide your leave details in the following format:"
                             }
                         }
                     ]
                 }, {
                     "widgets": [
                         {
-                            "selectionInput": {
-                                "name": "leave_type",
-                                "label": "Leave Type",
-                                "type": "DROPDOWN",
-                                "items": [
-                                    {"text": "Annual Leave", "value": "Annual"},
-                                    {"text": "Sick Leave", "value": "Sick"},
-                                    {"text": "Personal Leave", "value": "Personal"},
-                                    {"text": "Medical Leave", "value": "Medical"},
-                                    {"text": "Other", "value": "Other"}
-                                ]
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "name": "start_date",
-                                "label": "Start Date (YYYY-MM-DD)",
-                                "type": "SINGLE_LINE",
-                                "hint": "e.g., 2024-01-15"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "name": "end_date",
-                                "label": "End Date (YYYY-MM-DD)",
-                                "type": "SINGLE_LINE",
-                                "hint": "e.g., 2024-01-20"
-                            }
-                        }
-                    ]
-                }, {
-                    "widgets": [
-                        {
-                            "textInput": {
-                                "name": "reason",
-                                "label": "Reason for Leave",
-                                "type": "MULTIPLE_LINE",
-                                "hint": "Brief description of your leave request"
+                            "textParagraph": {
+                                "text": "<b>📋 Leave Request Format:</b><br><br>" +
+                                       "<b>Leave Type:</b> Annual, Sick, Personal, Medical, or Other<br>" +
+                                       "<b>Start Date:</b> YYYY-MM-DD (e.g., 2024-01-15)<br>" +
+                                       "<b>End Date:</b> YYYY-MM-DD (e.g., 2024-01-20)<br>" +
+                                       "<b>Reason:</b> Brief description of your leave request<br><br>" +
+                                       "<b>Example:</b><br>" +
+                                       "Leave Type: Annual<br>" +
+                                       "Start Date: 2024-01-15<br>" +
+                                       "End Date: 2024-01-20<br>" +
+                                       "Reason: Family vacation"
                             }
                         }
                     ]
@@ -290,7 +257,7 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
                         {
                             "buttons": [{
                                 "textButton": {
-                                    "text": "✅ Submit Leave Request",
+                                    "text": "📝 Submit Leave Details",
                                     "onClick": {
                                         "action": {
                                             "actionMethodName": "SUBMIT_LEAVE_REQUEST",
@@ -496,6 +463,60 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         print(f"💡 Processing message with Mira: \"{message_text}\"")
         print(f"👤 From: {sender_display_name} ({sender_email})")
         
+        # Check if this looks like a structured leave request
+        leave_data = parse_leave_request_text(message_text)
+        if leave_data:
+            print(f"📝 Detected structured leave request: {leave_data}")
+            
+            # Process the leave request directly
+            try:
+                # Import here to avoid circular imports
+                from agents.mira.mira import main_agent
+                
+                # Create a prompt that includes the space name and complete leave data
+                prompt = f"""Space: {space_name}
+
+User: I want to apply for leave with the following details:
+- Leave Type: {leave_data['leave_type']}
+- Start Date: {leave_data['start_date']}
+- End Date: {leave_data['end_date']}
+- Reason: {leave_data['reason']}
+
+Please process this leave request."""
+                
+                # Get user context
+                user_context = get_user_context_from_db(sender_email, space_name)
+                
+                # Process through main agent
+                response = main_agent.invoke({
+                    "messages": [("user", prompt)],
+                    "user_context": user_context
+                })
+                
+                print(f"📝 Main agent response: {response}")
+                
+                # Send confirmation
+                confirmation_message = f"""✅ **Leave Request Processed Successfully**
+
+**Leave Type:** {leave_data['leave_type']}
+**Start Date:** {leave_data['start_date']}
+**End Date:** {leave_data['end_date']}
+**Reason:** {leave_data['reason']}
+
+Your leave request has been submitted and will be processed by your supervisor."""
+                
+                async with httpx.AsyncClient() as client:
+                    await client.post(f"http://localhost:{PORT}/chat/send", json={
+                        "spaceName": space_name,
+                        "message": confirmation_message
+                    })
+                
+                return
+                
+            except Exception as agent_error:
+                print(f"❌ Error processing leave request through main agent: {agent_error}")
+                # Fall through to normal processing
+        
         # Retrieve user context from database
         user_context = get_user_context_from_db(sender_email, space_name)
         if user_context:
@@ -540,169 +561,84 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         except Exception as send_error:
             print(f"❌ Failed to send error message: {send_error}")
 
-async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, Any], sender_email: str, sender_display_name: str = "", request_id: str = "", supervisor_email: str = ""):
-    """Process leave request card form submission"""
+
+def parse_leave_request_text(message_text: str) -> Dict[str, str] | None:
+    """Parse structured leave request text and extract fields"""
     try:
-        print(f"📝 Processing leave request card submission from {sender_display_name} ({sender_email})")
-        print(f"📝 Form inputs: {form_inputs}")
-        
-        # Extract form data
-        leave_type = None
-        start_date = None
-        end_date = None
-        reason = None
-        
-        # Extract from form_inputs - Google Chat sends form data in a specific structure
-        if isinstance(form_inputs, dict):
-            # Handle selectionInput (dropdown) - Google Chat sends as {"leave_type": {"stringInputs": {"value": ["Annual"]}}}
-            if "leave_type" in form_inputs and "stringInputs" in form_inputs["leave_type"]:
-                leave_type_values = form_inputs["leave_type"]["stringInputs"]["value"]
-                if leave_type_values:
-                    leave_type = leave_type_values[0]
-            
-            # Handle textInput fields - Google Chat sends as {"start_date": {"stringInputs": {"value": ["2024-01-15"]}}}
-            if "start_date" in form_inputs and "stringInputs" in form_inputs["start_date"]:
-                start_date_values = form_inputs["start_date"]["stringInputs"]["value"]
-                if start_date_values:
-                    start_date = start_date_values[0]
-            
-            if "end_date" in form_inputs and "stringInputs" in form_inputs["end_date"]:
-                end_date_values = form_inputs["end_date"]["stringInputs"]["value"]
-                if end_date_values:
-                    end_date = end_date_values[0]
-            
-            if "reason" in form_inputs and "stringInputs" in form_inputs["reason"]:
-                reason_values = form_inputs["reason"]["stringInputs"]["value"]
-                if reason_values:
-                    reason = reason_values[0]
-        
-        # Validate required fields
-        missing_fields = []
-        if not leave_type:
-            missing_fields.append("Leave Type")
-        if not start_date:
-            missing_fields.append("Start Date")
-        if not end_date:
-            missing_fields.append("End Date")
-        if not reason:
-            missing_fields.append("Reason")
-        
-        if missing_fields:
-            error_message = f"❌ **Missing Required Fields**\n\nPlease fill in the following fields:\n• {', '.join(missing_fields)}\n\nPlease try submitting the form again."
-            
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": error_message
-                })
-            return
-        
-        # Validate date format (basic validation)
         import re
-        date_pattern = r'^\d{4}-\d{2}-\d{2}$'
-        if not re.match(date_pattern, start_date) or not re.match(date_pattern, end_date):
-            error_message = "❌ **Invalid Date Format**\n\nPlease use YYYY-MM-DD format for dates (e.g., 2024-01-15).\n\nPlease try submitting the form again."
-            
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": error_message
-                })
-            return
         
-        # Validate date logic
-        from datetime import datetime
-        try:
-            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-            
-            if start_dt > end_dt:
-                error_message = "❌ **Invalid Date Range**\n\nStart date cannot be after end date.\n\nPlease check your dates and try again."
-                
-                async with httpx.AsyncClient() as client:
-                    await client.post(f"http://localhost:{PORT}/chat/send", json={
-                        "spaceName": space_name,
-                        "message": error_message
-                    })
-                return
-        except ValueError:
-            error_message = "❌ **Invalid Date Format**\n\nPlease use YYYY-MM-DD format for dates (e.g., 2024-01-15).\n\nPlease try submitting the form again."
-            
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": error_message
-                })
-            return
+        # Normalize the text - remove extra whitespace and convert to lowercase for matching
+        text = message_text.strip()
         
-        # Prepare complete leave request payload
-        leave_payload = {
-            "employee_email": sender_email,
-            "leave_type": leave_type,
-            "start_date": start_date,
-            "end_date": end_date,
-            "reason": reason,
-            "supervisor_email": supervisor_email,
-            "request_id": request_id
+        # Look for structured format patterns
+        patterns = {
+            'leave_type': r'(?:leave\s+type|type)[:\s]+([^\n\r]+)',
+            'start_date': r'(?:start\s+date|from)[:\s]+([^\n\r]+)',
+            'end_date': r'(?:end\s+date|to)[:\s]+([^\n\r]+)',
+            'reason': r'(?:reason|purpose)[:\s]+([^\n\r]+)'
         }
         
-        print(f"📝 Processed leave request: {leave_payload}")
+        extracted = {}
+        for field, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                if value:
+                    extracted[field] = value
         
-        # Send confirmation message
-        confirmation_message = f"""✅ **Leave Request Submitted Successfully**
+        # Validate that we have all required fields
+        required_fields = ['leave_type', 'start_date', 'end_date', 'reason']
+        if all(field in extracted for field in required_fields):
+            # Clean up the values
+            extracted['leave_type'] = extracted['leave_type'].strip()
+            extracted['start_date'] = extracted['start_date'].strip()
+            extracted['end_date'] = extracted['end_date'].strip()
+            extracted['reason'] = extracted['reason'].strip()
+            
+            # Basic validation
+            date_pattern = r'^\d{4}-\d{2}-\d{2}$'
+            if (re.match(date_pattern, extracted['start_date']) and 
+                re.match(date_pattern, extracted['end_date'])):
+                return extracted
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error parsing leave request text: {e}")
+        return None
+
+async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, Any], sender_email: str, sender_display_name: str = "", request_id: str = "", supervisor_email: str = ""):
+    """Process leave request card submission - now prompts user to provide details in text format"""
+    try:
+        print(f"📝 Processing leave request card submission from {sender_display_name} ({sender_email})")
+        
+        # Send instructions for providing leave details in text format
+        instructions_message = f"""📝 **Leave Request Details Required**
 
 **Request ID:** {request_id}
-**Employee:** {sender_display_name} ({sender_email})
-**Leave Type:** {leave_type}
-**Start Date:** {start_date}
-**End Date:** {end_date}
-**Reason:** {reason}
-**Supervisor:** {supervisor_email}
 
-Your leave request has been submitted and will be processed by your supervisor."""
+Please provide your leave details in the following format:
+
+**Leave Type:** Annual, Sick, Personal, Medical, or Other
+**Start Date:** YYYY-MM-DD (e.g., 2024-01-15)
+**End Date:** YYYY-MM-DD (e.g., 2024-01-20)  
+**Reason:** Brief description of your leave request
+
+**Example:**
+```
+Leave Type: Annual
+Start Date: 2024-01-15
+End Date: 2024-01-20
+Reason: Family vacation
+```
+
+Please send your leave details in this exact format."""
         
         async with httpx.AsyncClient() as client:
             await client.post(f"http://localhost:{PORT}/chat/send", json={
                 "spaceName": space_name,
-                "message": confirmation_message
+                "message": instructions_message
             })
-        
-        # Process the leave request through the main agent
-        try:
-            # Import here to avoid circular imports
-            from agents.mira.mira import main_agent
-            
-            # Create a prompt that includes the space name and complete leave data
-            prompt = f"""Space: {space_name}
-
-User: I want to apply for leave with the following details:
-- Leave Type: {leave_type}
-- Start Date: {start_date}
-- End Date: {end_date}
-- Reason: {reason}
-- Request ID: {request_id}
-
-Please process this leave request."""
-            
-            # Get user context
-            user_context = get_user_context_from_db(sender_email)
-            
-            # Process through main agent
-            response = main_agent.invoke({
-                "messages": [("user", prompt)],
-                "user_context": user_context
-            })
-            
-            print(f"📝 Main agent response: {response}")
-            
-        except Exception as agent_error:
-            print(f"❌ Error processing through main agent: {agent_error}")
-            # Send error message
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": "⚠️ There was an error processing your leave request. Please contact HR for assistance."
-                })
     
     except Exception as error:
         print(f"❌ Failed to process leave card submission: {error}")
