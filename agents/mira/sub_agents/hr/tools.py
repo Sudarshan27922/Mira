@@ -87,7 +87,7 @@ def send_leave_info_card(user_email: str, space_name: str, supervisor_email: str
     
     Args:
         user_email: Employee email address
-        space_name: Google Chat space name
+        space_name: Google Chat space name (format: spaces/ABC123)
         supervisor_email: Supervisor's email address
         request_id: Unique request identifier
         
@@ -95,6 +95,13 @@ def send_leave_info_card(user_email: str, space_name: str, supervisor_email: str
         Dict with status and request details
     """
     try:
+        # Debug logging
+        print(f"📧 Sending leave info card:")
+        print(f"   Space name: {space_name}")
+        print(f"   User email: {user_email}")
+        print(f"   Supervisor: {supervisor_email}")
+        print(f"   Request ID: {request_id}")
+        
         port = int(os.getenv("PORT", 3005))
         
         # Call the server endpoint to send the leave card
