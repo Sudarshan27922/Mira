@@ -202,7 +202,6 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
         
         # Import utilities
         from agents.utils import db_util, user_context
-        import httpx
         
         # Get leave request details from database
         print(f"📋 STEP 2: Retrieving leave request from database...")
@@ -250,6 +249,7 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
         # Send approval card via API
         print(f"\n📨 STEP 5: Preparing to send approval card...")
         import os
+        import requests
         port = int(os.getenv("PORT", 3005))
         
         print(f"   API Endpoint: http://localhost:{port}/chat/send-approval-card")
@@ -260,28 +260,27 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
         print(f"      - Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
         print(f"      - Reason: {leave_request.get('reason')}")
         
-        async def send_card():
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"http://localhost:{port}/chat/send-approval-card",
-                    json={
-                        "requestId": request_id,
-                        "employeeEmail": leave_request.get("employee_email"),
-                        "employeeName": employee_name,
-                        "supervisorEmail": supervisor_email,
-                        "supervisorSpace": supervisor_space,
-                        "leaveType": leave_request.get("leave_type"),
-                        "startDate": leave_request.get("start_date"),
-                        "endDate": leave_request.get("end_date"),
-                        "reason": leave_request.get("reason")
-                    }
-                )
-                return response.json()
-        
-        # Run the async function
+        # Send approval card via synchronous HTTP request
         print(f"\n🚀 STEP 6: Sending approval card to supervisor...")
-        import asyncio
-        result = asyncio.run(send_card())
+        try:
+            response = requests.post(
+                f"http://localhost:{port}/chat/send-approval-card",
+                json={
+                    "requestId": request_id,
+                    "employeeEmail": leave_request.get("employee_email"),
+                    "employeeName": employee_name,
+                    "supervisorEmail": supervisor_email,
+                    "supervisorSpace": supervisor_space,
+                    "leaveType": leave_request.get("leave_type"),
+                    "startDate": leave_request.get("start_date"),
+                    "endDate": leave_request.get("end_date"),
+                    "reason": leave_request.get("reason")
+                }
+            )
+            result = response.json()
+        except Exception as req_error:
+            print(f"❌ HTTP Request Error: {req_error}")
+            return {"status": "ERROR", "request_id": request_id, "error": f"HTTP request failed: {str(req_error)}"}
         
         if result.get("success"):
             print(f"✅ SUCCESS: Approval card sent to supervisor!")
