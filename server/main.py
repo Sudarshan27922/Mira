@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from agents.mira.mira import main_agent
+from agents.utils.user_context import get_user_context_from_db
 
 # Load environment variables
 load_dotenv()
@@ -32,17 +33,19 @@ app.add_middleware(
 
 # Configuration
 PORT = int(os.getenv("PORT", 3005))
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_KEY_FILE", "./service-account-key.json")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_KEY_FILE", "./server/service-account-key.json")
 
 SCOPES = [
     "https://www.googleapis.com/auth/chat.bot",
     "https://www.googleapis.com/auth/chat.messages",
     "https://www.googleapis.com/auth/chat.spaces",
+    "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
 # Global variables
 auth_client = None
 chat_service = None
+calendar_service = None
 
 # Pydantic models
 class SendMessageRequest(BaseModel):
@@ -59,6 +62,12 @@ class SendCardRequest(BaseModel):
     text: str
     buttons: Optional[List[Dict[str, str]]] = None
 
+class SendLeaveCardRequest(BaseModel):
+    spaceName: str
+    employeeEmail: str
+    supervisorEmail: str
+    requestId: str
+
 class WebhookEvent(BaseModel):
     chat: Optional[Dict[str, Any]] = None
     applicationId: Optional[str] = None
@@ -66,7 +75,7 @@ class WebhookEvent(BaseModel):
 
 # Initialize Google Auth and Chat service
 def initialize_google_services():
-    global auth_client, chat_service
+    global auth_client, chat_service, calendar_service
     try:
         if os.path.exists(SERVICE_ACCOUNT_FILE):
             credentials = service_account.Credentials.from_service_account_file(
@@ -74,7 +83,8 @@ def initialize_google_services():
             )
             auth_client = credentials
             chat_service = build('chat', 'v1', credentials=credentials)
-            print("✅ Google Chat services initialized successfully")
+            calendar_service = build('calendar', 'v3', credentials=credentials)
+            print("✅ Google Chat and Calendar services initialized successfully")
         else:
             print("❌ Service account file not found")
     except Exception as error:
@@ -207,6 +217,84 @@ def send_card(space_name: str, title: str, subtitle: str = None, text: str = "",
         print(f"❌ Error sending card: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
+def send_leave_request_card(space_name: str, employee_email: str, supervisor_email: str, request_id: str) -> Dict[str, Any]:
+    """Send an interactive leave request card with form widgets to a specific Google Chat space"""
+    if not chat_service:
+        raise HTTPException(status_code=500, detail="Google Chat service not initialized")
+    
+    try:
+        # Build a card with structured input fields using textParagraph and buttons
+        card = {
+            "cards": [{
+                "header": {
+                    "title": "Leave Request Form",
+                    "subtitle": f"Request ID: {request_id}"
+                },
+                "sections": [{
+                    "widgets": [
+                        {
+                            "textParagraph": {
+                                "text": f"<b>Employee:</b> {employee_email}<br><b>Supervisor:</b> {supervisor_email}<br><br>Please provide your leave details in the following format:"
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "textParagraph": {
+                                "text": "<b>📋 Leave Request Format:</b><br><br>" +
+                                       "<b>Leave Type:</b> Annual, Sick, Personal, Medical, or Other<br>" +
+                                       "<b>Start Date:</b> YYYY-MM-DD (e.g., 2024-01-15)<br>" +
+                                       "<b>End Date:</b> YYYY-MM-DD (e.g., 2024-01-20)<br>" +
+                                       "<b>Reason:</b> Brief description of your leave request<br><br>" +
+                                       "<b>Example:</b><br>" +
+                                       "Leave Type: Annual<br>" +
+                                       "Start Date: 2024-01-15<br>" +
+                                       "End Date: 2024-01-20<br>" +
+                                       "Reason: Family vacation"
+                            }
+                        }
+                    ]
+                }, {
+                    "widgets": [
+                        {
+                            "buttons": [{
+                                "textButton": {
+                                    "text": "📝 Submit Leave Details",
+                                    "onClick": {
+                                        "action": {
+                                            "actionMethodName": "SUBMIT_LEAVE_REQUEST",
+                                            "parameters": [
+                                                {"key": "request_id", "value": request_id},
+                                                {"key": "employee_email", "value": employee_email},
+                                                {"key": "supervisor_email", "value": supervisor_email}
+                                            ]
+                                        }
+                                    }
+                                }
+                            }]
+                        }
+                    ]
+                }]
+            }]
+        }
+        
+        response = chat_service.spaces().messages().create(
+            parent=space_name,
+            body=card
+        ).execute()
+        
+        return {
+            "success": True,
+            "messageId": response.get('name'),
+            "space": space_name,
+            "request_id": request_id,
+            "card": card
+        }
+    except Exception as error:
+        print(f"❌ Error sending leave request card: {error}")
+        raise HTTPException(status_code=500, detail=str(error))
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
@@ -281,6 +369,23 @@ async def send_card_endpoint(request: SendCardRequest):
         print(f"❌ Error in send card endpoint: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
+# Send leave request card to space
+@app.post("/chat/send-leave-card")
+async def send_leave_card_endpoint(request: SendLeaveCardRequest):
+    try:
+        result = send_leave_request_card(
+            space_name=request.spaceName,
+            employee_email=request.employeeEmail,
+            supervisor_email=request.supervisorEmail,
+            request_id=request.requestId
+        )
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"❌ Error in send leave card endpoint: {error}")
+        raise HTTPException(status_code=500, detail=str(error))
+
 # Webhook handler for incoming messages
 @app.api_route("/chat/webhook", methods=["GET", "POST"])
 async def webhook_handler(request: Request):
@@ -329,8 +434,15 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         print(f"💡 Processing message with Mira: \"{message_text}\"")
         print(f"👤 From: {sender_display_name} ({sender_email})")
         
-        # Get response from Mira agent
-        agent_response = main_agent(message_text)
+        # Retrieve user context from database
+        user_context = get_user_context_from_db(sender_email, space_name)
+        if user_context:
+            print(f"✅ Found user context: {user_context.get('emp_name', 'Unknown')} ({user_context.get('designation', 'Unknown')})")
+        else:
+            print(f"⚠️ No user context found for {sender_email}")
+        
+        # Get response from Mira agent with user context and space name
+        agent_response = main_agent(message_text, user_context, space_name)
         
         if agent_response:
             print(f"💬 Sending Mira response to {space_name}...")
@@ -378,6 +490,7 @@ if __name__ == "__main__":
     print("   POST /chat/send               → Send message to space")
     print("   POST /chat/broadcast          → Broadcast to all spaces")
     print("   POST /chat/send-card          → Send rich card to space")
+    print("   POST /chat/send-leave-card    → Send interactive leave request card")
     print("   POST /chat/webhook            → Handle incoming messages")
     print("")
     print("💬 Mira is ready to help with:")
