@@ -62,6 +62,97 @@ def check_calendar_conflicts(user_email: str, start_date: str, end_date: str) ->
 
 
 @tool
+def query_user_calendar(start_date: str, end_date: str, user_email: str = "") -> Dict[str, Any]:
+    """Query a user's Google Calendar for events within the given date range.
+    
+    This tool retrieves calendar events and returns formatted information about meetings/events.
+    Use this to:
+    - Check if user has meetings during a time period
+    - View user's schedule for coordination
+    - Identify potential conflicts before scheduling
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        user_email: User's email (required - use user_context['emp_email'])
+        
+    Returns:
+        Dict with formatted calendar information:
+        - events: List of calendar events with details
+        - total_events: Count of events found
+        - message: Human-readable summary
+        - date_range: The queried date range
+    """
+    try:
+        from agents.utils.calendar_utils import get_user_calendar_events
+        
+        # If no user_email provided, this will fail - HR agent should always provide it
+        if not user_email:
+            return {
+                "status": "error",
+                "error": "user_email is required",
+                "message": "Please provide the user's email address to query their calendar."
+            }
+        
+        # Get configuration from environment
+        use_domain_delegation = os.getenv("USE_DOMAIN_DELEGATION", "true").lower() == "true"
+        
+        # Query calendar
+        result = get_user_calendar_events(user_email, start_date, end_date, use_domain_delegation)
+        
+        if result.get("status") == "error":
+            return {
+                "status": "error",
+                "error": result.get("error"),
+                "message": f"Unable to retrieve calendar for {user_email}. They may need to share their calendar."
+            }
+        
+        events = result.get("conflicts", [])  # "conflicts" is a misnomer, these are just events
+        
+        if not events:
+            return {
+                "status": "success",
+                "events": [],
+                "total_events": 0,
+                "message": f"No events found for {user_email} from {start_date} to {end_date}.",
+                "date_range": {"start": start_date, "end": end_date}
+            }
+        
+        # Format events into readable message
+        message = f"📅 Found {len(events)} event(s) for {user_email} from {start_date} to {end_date}:\n\n"
+        
+        for i, event in enumerate(events, 1):
+            from datetime import datetime
+            start_dt = datetime.fromisoformat(event['start'].replace('Z', '+00:00'))
+            summary = event.get('summary', 'Untitled Event')
+            location = event.get('location', '')
+            
+            message += f"{i}. {summary}\n"
+            message += f"   📅 {start_dt.strftime('%B %d, %Y at %I:%M %p')}\n"
+            if location:
+                message += f"   📍 {location}\n"
+            if event.get('attendees', 0) > 0:
+                message += f"   👥 {event['attendees']} attendee(s)\n"
+            message += "\n"
+        
+        return {
+            "status": "success",
+            "events": events,
+            "total_events": len(events),
+            "message": message,
+            "date_range": {"start": start_date, "end": end_date}
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in query_user_calendar: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to query calendar. Please try again."
+        }
+
+
+@tool
 def send_supervisor_approval(request_id: str, supervisor_email: str, summary: str) -> Dict[str, Any]:
     """Send a Google Chat card to supervisor asking approval for the given request_id. Returns status placeholder.
 
@@ -152,6 +243,7 @@ HR_TOOLS = [
     record_leave_request,
     leave_process_workflow,
     leave_process_resume,
+    query_user_calendar,
 ]
 
 
