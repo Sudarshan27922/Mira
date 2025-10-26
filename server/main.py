@@ -375,7 +375,7 @@ def send_supervisor_approval_card(
                                             "text": "Approve",
                                             "onClick": {
                                                 "openLink": {
-                                                    "url": f"http://localhost:3005/chat/process-approval?request_id={request_id}&action=APPROVE&space={supervisor_space}"
+                                                    "url": os.getenv("PUBLIC_WEBHOOK_URL", "http://localhost:3005") + f"/chat/process-approval?request_id={request_id}&action=APPROVE&space={supervisor_space}"
                                                 }
                                             }
                                         }
@@ -385,7 +385,7 @@ def send_supervisor_approval_card(
                                             "text": "Decline",
                                             "onClick": {
                                                 "openLink": {
-                                                    "url": f"http://localhost:3005/chat/process-approval?request_id={request_id}&action=DECLINE&space={supervisor_space}"
+                                                    "url": os.getenv("PUBLIC_WEBHOOK_URL", "http://localhost:3005") + f"/chat/process-approval?request_id={request_id}&action=DECLINE&space={supervisor_space}"
                                                 }
                                             }
                                         }
@@ -569,9 +569,9 @@ async def send_approval_card_endpoint(request: SendApprovalCardRequest):
 @app.get("/chat/process-approval")
 async def process_approval_button(request: Request):
     """Process approval/decline when button is clicked - receives GET request with query params"""
+    from fastapi.responses import HTMLResponse
+    
     try:
-        from fastapi import Query
-        
         request_id = request.query_params.get("request_id")
         action = request.query_params.get("action")
         space = request.query_params.get("space")
@@ -584,7 +584,12 @@ async def process_approval_button(request: Request):
         print(f"{'='*70}\n")
         
         if not request_id or not action:
-            return {"success": False, "error": "Missing parameters"}
+            return HTMLResponse(content="""
+                <html><body>
+                    <h1>Error</h1>
+                    <p>Missing parameters. Please close this window.</p>
+                </body></html>
+            """)
         
         # Import database utilities
         from agents.utils import db_util
@@ -593,7 +598,12 @@ async def process_approval_button(request: Request):
         leave_request = db_util.get_leave_request(request_id)
         
         if not leave_request:
-            return {"success": False, "error": "Request not found"}
+            return HTMLResponse(content="""
+                <html><body>
+                    <h1>Request Not Found</h1>
+                    <p>Leave request not found in database. Please close this window.</p>
+                </body></html>
+            """)
         
         # Update status
         new_status = "APPROVED" if action == "APPROVE" else "DECLINED"
@@ -602,7 +612,12 @@ async def process_approval_button(request: Request):
         success = db_util.update_leave_request_status(request_id, new_status, decision_note)
         
         if not success:
-            return {"success": False, "error": "Failed to update database"}
+            return HTMLResponse(content="""
+                <html><body>
+                    <h1>Database Error</h1>
+                    <p>Failed to update database. Please close this window.</p>
+                </body></html>
+            """)
         
         # Send notifications
         employee_space = leave_request.get("employee_space")
@@ -622,11 +637,39 @@ async def process_approval_button(request: Request):
         print(f"✅ {new_status} complete!")
         print(f"{'='*70}\n")
         
-        return {"success": True, "status": new_status, "request_id": request_id}
+        # Return success page
+        return HTMLResponse(content=f"""
+            <html>
+                <head>
+                    <title>Leave Request {new_status}</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                        h1 {{ color: #34A853; }}
+                        .success {{ background: #f0f9ff; padding: 20px; border-radius: 10px; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="success">
+                        <h1>✓ Leave Request {new_status}</h1>
+                        <p>Request ID: {request_id}</p>
+                        <p>The employee has been notified.</p>
+                        <p><small>You can close this window.</small></p>
+                    </div>
+                </body>
+            </html>
+        """)
         
     except Exception as error:
         print(f"❌ Error processing approval button: {error}")
-        return {"success": False, "error": str(error)}
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(content=f"""
+            <html><body>
+                <h1>Error</h1>
+                <p>An error occurred: {str(error)}</p>
+                <p>Please close this window.</p>
+            </body></html>
+        """)
 
 # Webhook handler for incoming messages
 @app.api_route("/chat/webhook", methods=["GET", "POST"])
