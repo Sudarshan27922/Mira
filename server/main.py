@@ -406,38 +406,6 @@ async def webhook_handler(request: Request):
         sender_type = sender_info.get("type")
         sender_display_name = sender_info.get("displayName", "")
         
-        # Check if this is a card form submission
-        action_data = event.get("chat", {}).get("actionMethodName")
-        form_inputs = event.get("chat", {}).get("formInputs", {})
-        
-        if action_data == "SUBMIT_LEAVE_REQUEST":
-            print("📝 Processing leave request card submission")
-            
-            # Extract parameters from action
-            action_params = event.get("chat", {}).get("parameters", [])
-            request_id = ""
-            supervisor_email = ""
-            
-            for param in action_params:
-                if param.get("key") == "request_id":
-                    request_id = param.get("value", "")
-                elif param.get("key") == "supervisor_email":
-                    supervisor_email = param.get("value", "")
-            
-            print(f"📝 Extracted parameters - Request ID: {request_id}, Supervisor: {supervisor_email}")
-            
-            # Process in background
-            import asyncio
-            asyncio.create_task(process_leave_card_submission(
-                space_name, 
-                form_inputs, 
-                sender_email, 
-                sender_display_name,
-                request_id,
-                supervisor_email
-            ))
-            return response
-        
         if not space_name or not message_text:
             print("⚠️ No space name or message text found in event")
             return response
@@ -503,52 +471,6 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
                 await client.post(f"http://localhost:{PORT}/chat/send", json={
                     "spaceName": space_name,
                     "message": "I'm sorry, I'm having trouble processing your request right now. Please try again later."
-                })
-        except Exception as send_error:
-            print(f"❌ Failed to send error message: {send_error}")
-
-async def process_leave_card_submission(space_name: str, form_inputs: Dict[str, Any], sender_email: str, sender_display_name: str = "", request_id: str = "", supervisor_email: str = ""):
-    """Process leave request card submission - prompts user to provide details in text format"""
-    try:
-        print(f"📝 Processing leave request card submission from {sender_display_name} ({sender_email})")
-        
-        # Send instructions for providing leave details in text format
-        instructions_message = f"""📝 **Leave Request Details Required**
-
-**Request ID:** {request_id}
-
-Please provide your leave details in the following format:
-
-**Leave Type:** Annual, Sick, Personal, Medical, or Other
-**Start Date:** YYYY-MM-DD (e.g., 2024-01-15)
-**End Date:** YYYY-MM-DD (e.g., 2024-01-20)  
-**Reason:** Brief description of your leave request
-
-**Example:**
-```
-Leave Type: Annual
-Start Date: 2024-01-15
-End Date: 2024-01-20
-Reason: Family vacation
-```
-
-Please send your leave details in this exact format."""
-        
-        async with httpx.AsyncClient() as client:
-            await client.post(f"http://localhost:{PORT}/chat/send", json={
-                "spaceName": space_name,
-                "message": instructions_message
-            })
-    
-    except Exception as error:
-        print(f"❌ Failed to process leave card submission: {error}")
-        
-        # Send error message
-        try:
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": "I'm sorry, there was an error processing your leave request. Please try again."
                 })
         except Exception as send_error:
             print(f"❌ Failed to send error message: {send_error}")
