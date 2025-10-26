@@ -25,6 +25,8 @@ def check_calendar_conflicts(user_email: str, start_date: str, end_date: str) ->
         # Check calendar for events
         result = get_user_calendar_events(user_email, start_date, end_date, use_domain_delegation)
         
+        print(f"🗓️ Calendar check result: {result}")
+
         if result.get("status") == "error":
             print(f"⚠️ Calendar check failed: {result.get('error')}")
             # Return no conflicts on error to not block the workflow
