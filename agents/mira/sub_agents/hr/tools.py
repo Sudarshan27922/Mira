@@ -257,6 +257,8 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
         if server_path not in sys.path:
             sys.path.insert(0, server_path)
         
+        result = None
+        
         try:
             # Initialize Google services first
             print(f"   Initializing Google Chat service...")
@@ -316,7 +318,7 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
             traceback.print_exc()
             return {"status": "ERROR", "request_id": request_id, "error": f"Function call failed: {str(func_error)}"}
         
-        if result.get("success"):
+        if result and result.get("success"):
             print(f"✅ SUCCESS: Approval card sent to supervisor!")
             print(f"   Message ID: {result.get('messageId')}")
             print(f"   Space: {result.get('space')}")
@@ -327,7 +329,7 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
             return {"status": "SENT", "request_id": request_id, "supervisor_email": supervisor_email}
         else:
             print(f"❌ FAILED: Could not send approval card")
-            print(f"   Error: {result}")
+            print(f"   Result: {result}")
             print(f"\n{'='*70}")
             print(f"❌ Leave approval workflow failed")
             print(f"{'='*70}\n")

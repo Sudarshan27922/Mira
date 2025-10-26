@@ -590,12 +590,20 @@ async def webhook_handler(request: Request):
         
         # Check if this is a card click action (button interaction)
         action_response = event.get("action", {})
+        print(f"🔍 Checking for button action: action_response keys = {action_response.keys() if action_response else 'None'}")
+        
         if action_response and action_response.get("actionMethodName"):
-            print("🎯 Card button action detected")
+            print("🎯 Card button action detected!")
+            print(f"   Action method: {action_response.get('actionMethodName')}")
+            print(f"   Parameters: {action_response.get('parameters', [])}")
             # Process card button action in background
             import asyncio
             asyncio.create_task(process_card_button_action(event))
             return response
+        else:
+            print(f"ℹ️  Not a button action - checking other event types...")
+            print(f"   Event keys: {list(event.keys())}")
+            print(f"   Event type: {event.get('type', 'unknown')}")
         
         # Extract event data for regular messages
         # Google Chat webhook format can vary, try multiple paths
@@ -701,18 +709,15 @@ async def process_card_button_action(event: Dict[str, Any]):
                             {
                                 "widgets": [
                                     {
-                                        "decoratedText": {
+                                        "keyValue": {
                                             "topLabel": "Status",
-                                            "text": f"✅ {new_status}",
-                                            "startIcon": {
-                                                "iconUrl": "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/send/v33/24px.svg"
-                                            }
+                                            "content": f"{new_status}"
                                         }
                                     },
                                     {
-                                        "decoratedText": {
+                                        "keyValue": {
                                             "topLabel": "Employee",
-                                            "text": f"{employee_email}"
+                                            "content": f"{employee_email}"
                                         }
                                     }
                                 ]
