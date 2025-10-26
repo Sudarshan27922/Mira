@@ -26,9 +26,13 @@ def _make_agent_tool(name: str, description: str, executor_factory):
 # Special wrapper for HR agent that can accept user context
 def _make_hr_agent_tool(name: str, description: str, executor_factory):
     def _run(task: str, user_context: str = "") -> str:
+        from datetime import datetime
+        today_iso = datetime.now().date().isoformat()
+        
         executor = executor_factory()
-        # Include user context in the input if provided
-        full_input = f"{user_context}\n\n{task}" if user_context else task
+        # Include user context and today's date in the input if provided
+        date_context = f"Today's date: {today_iso}. When I mention relative dates, interpret them relative to today's date.\n\n"
+        full_input = f"{user_context}\n\n{date_context}{task}" if user_context else f"{date_context}{task}"
         result = executor.invoke({"input": full_input})
         return result.get("output", "")
 

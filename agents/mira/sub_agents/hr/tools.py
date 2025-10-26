@@ -91,15 +91,29 @@ def query_user_calendar(start_date: str, end_date: str, user_email: str = "") ->
     try:
         from agents.utils.calendar_utils import get_user_calendar_events
         import re
+        from datetime import datetime
+        
+        print(f"🔍 query_user_calendar called with start_date='{start_date}', end_date='{end_date}', user_email='{user_email}'")
         
         # Validate date format - must be YYYY-MM-DD
         date_pattern = r'^\d{4}-\d{2}-\d{2}$'
         if not re.match(date_pattern, start_date) or not re.match(date_pattern, end_date):
+            error_msg = f"Dates must be in YYYY-MM-DD format. Received: start_date='{start_date}', end_date='{end_date}'"
+            print(f"❌ {error_msg}")
             return {
                 "status": "error",
                 "error": "Invalid date format",
-                "message": f"Dates must be in YYYY-MM-DD format. Received: start_date='{start_date}', end_date='{end_date}'"
+                "message": error_msg
             }
+        
+        # Check if date is in the past (likely a mistake)
+        try:
+            date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+            today = datetime.now()
+            if date_obj < today and (today - date_obj).days > 30:
+                print(f"⚠️ Warning: Querying date from the past: {start_date}")
+        except:
+            pass
         
         # If no user_email provided, this will fail - HR agent should always provide it
         if not user_email:
