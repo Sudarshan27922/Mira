@@ -33,7 +33,7 @@ app.add_middleware(
 
 # Configuration
 PORT = int(os.getenv("PORT", 3005))
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_KEY_FILE", "./server/service-account-key.json")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_KEY_FILE", "./service-account-key.json")
 
 SCOPES = [
     "https://www.googleapis.com/auth/chat.bot",
