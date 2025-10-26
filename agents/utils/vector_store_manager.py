@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from .document_processor import DocumentProcessor
 from ..config.pinecone_config import pinecone_config
 
+# he
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
