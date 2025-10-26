@@ -56,9 +56,13 @@ def get_user_calendar_events(
         print(f"✅ Calendar service retrieved successfully")
         
         # Convert dates to RFC3339 format
-        start_datetime = f"{start_date}T00:00:00Z"
-        end_datetime = f"{end_date}T23:59:59Z"
+        # Use start of day in local timezone (converts to UTC automatically by API)
+        # For example, if querying "tomorrow" in IST (+05:30), we need to query the full day
+        # The API will handle timezone conversion automatically, but we should use local time for accuracy
+        start_datetime = f"{start_date}T00:00:00+00:00"  # Start of day UTC
+        end_datetime = f"{end_date}T23:59:59+00:00"  # End of day UTC
         print(f"📅 Querying calendar from {start_datetime} to {end_datetime}")
+        print(f"📅 Note: Querying in UTC - calendar API will convert to user's timezone")
         
         # If using domain-wide delegation, create delegated credentials
         if use_domain_delegation:
@@ -79,6 +83,13 @@ def get_user_calendar_events(
         # Query calendar events with freebusy-compatible view
         # Note: With "See only free/busy" permission, we get limited details
         try:
+            print(f"🔍 Query parameters:")
+            print(f"   calendarId: primary")
+            print(f"   timeMin: {start_datetime}")
+            print(f"   timeMax: {end_datetime}")
+            print(f"   user_email: {user_email}")
+            print(f"   singleEvents: True")
+            
             events_result = user_calendar_service.events().list(
                 calendarId='primary',
                 timeMin=start_datetime,
@@ -87,7 +98,10 @@ def get_user_calendar_events(
                 orderBy='startTime',
                 maxResults=250
             ).execute()
+            
+            print(f"🔍 API Response: {len(events_result.get('items', []))} events found")
         except Exception as e:
+            print(f"❌ Calendar API error: {e}")
             # If we get a permission error, try with minimal access
             if 'insufficient' in str(e).lower() or 'permission' in str(e).lower():
                 print(f"⚠️ Limited calendar access - using freebusy view")
@@ -99,10 +113,16 @@ def get_user_calendar_events(
         print(f"🔍 Found {len(events)} total events in calendar")
         
         # Debug: Show first few events
+        print(f"📋 Debugging events:")
         for i, event in enumerate(events[:3]):
             summary = event.get('summary', 'Untitled')
             start = event.get('start', {})
-            print(f"   Event {i+1}: {summary} - {start}")
+            print(f"   Event {i+1}: {summary}")
+            print(f"      Start: {start}")
+            if 'dateTime' in start:
+                print(f"      Timezone: {start.get('timeZone', 'UTC')}")
+        if len(events) > 3:
+            print(f"   ... and {len(events) - 3} more events")
         
         # Filter and format conflicts
         conflicts = []
