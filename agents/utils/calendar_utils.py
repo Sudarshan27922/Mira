@@ -85,12 +85,14 @@ def get_user_calendar_events(
         ).execute()
         
         events = events_result.get('items', [])
+        print(f"🔍 Found {len(events)} total events in calendar")
         
         # Filter and format conflicts
         conflicts = []
         for event in events:
             # Skip all-day events or declined events
             if event.get('start').get('date'):  # All-day event
+                print(f"⏭️ Skipping all-day event: {event.get('summary', 'Untitled')}")
                 continue
             
             attendee_response = None
@@ -102,10 +104,13 @@ def get_user_calendar_events(
             
             # Skip if user declined
             if attendee_response == 'declined':
+                print(f"⏭️ Skipping declined event: {event.get('summary', 'Untitled')}")
                 continue
             
             start = event['start'].get('dateTime', event['start'].get('date'))
             end = event['end'].get('dateTime', event['end'].get('date'))
+            
+            print(f"✅ Including event: {event.get('summary', 'Untitled')} at {start}")
             
             conflicts.append({
                 "summary": event.get('summary', 'Untitled Event'),
