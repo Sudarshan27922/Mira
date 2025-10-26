@@ -323,6 +323,8 @@ def send_supervisor_approval_card(
     try:
         print(f"\n🎴 Building approval card structure...")
         # Build approval card with approve and decline buttons
+        # Build card with proper Google Chat API format
+        # Format: Use keyValue and textParagraph widgets
         card = {
             "cards": [{
                 "header": {
@@ -333,33 +335,33 @@ def send_supervisor_approval_card(
                     {
                         "widgets": [
                             {
-                                "decoratedText": {
+                                "keyValue": {
                                     "topLabel": "Employee",
-                                    "text": f"{employee_name} ({employee_email})"
+                                    "content": f"{employee_name} ({employee_email})"
                                 }
                             },
                             {
-                                "decoratedText": {
+                                "keyValue": {
                                     "topLabel": "Leave Type",
-                                    "text": leave_type
+                                    "content": leave_type
                                 }
                             },
                             {
-                                "decoratedText": {
+                                "keyValue": {
                                     "topLabel": "Start Date",
-                                    "text": start_date
+                                    "content": start_date
                                 }
                             },
                             {
-                                "decoratedText": {
+                                "keyValue": {
                                     "topLabel": "End Date",
-                                    "text": end_date
+                                    "content": end_date
                                 }
                             },
                             {
-                                "decoratedText": {
+                                "keyValue": {
                                     "topLabel": "Reason",
-                                    "text": reason
+                                    "content": reason
                                 }
                             }
                         ]
@@ -370,7 +372,7 @@ def send_supervisor_approval_card(
                                 "buttons": [
                                     {
                                         "textButton": {
-                                            "text": "✅ Approve",
+                                            "text": "Approve",
                                             "onClick": {
                                                 "action": {
                                                     "actionMethodName": "APPROVE_LEAVE",
@@ -384,7 +386,7 @@ def send_supervisor_approval_card(
                                     },
                                     {
                                         "textButton": {
-                                            "text": "❌ Decline",
+                                            "text": "Decline",
                                             "onClick": {
                                                 "action": {
                                                     "actionMethodName": "DECLINE_LEAVE",
