@@ -51,7 +51,7 @@ def get_sql_system_prompt() -> ChatPromptTemplate:
                 "    kd.track, kd.designation, kd.competency\n"
                 "  FROM p\n"
                 "  LEFT JOIN public.employee m ON m.emp_email = p.manager_email\n"
-                "  LEFT JOIN public.employee kd ON kd.emp_id = p.key_developer_id;\n\n"
+                "  LEFT JOIN public.employee kd ON kd.id = p.key_developer_id;\n\n"
                 "Validation step:\n"
                 "- If manager and key developer resolve to the same person, double-check the columns used; only report them as the same if the underlying identifiers match exactly. Otherwise, correct the lookup and retry.\n\n"
                 "Safety and correctness guidelines:\n"
