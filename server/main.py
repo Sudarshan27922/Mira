@@ -68,6 +68,17 @@ class SendLeaveCardRequest(BaseModel):
     supervisorEmail: str
     requestId: str
 
+class SendApprovalCardRequest(BaseModel):
+    requestId: str
+    employeeEmail: str
+    employeeName: str
+    supervisorEmail: str
+    supervisorSpace: str
+    leaveType: str
+    startDate: str
+    endDate: str
+    reason: str
+
 class WebhookEvent(BaseModel):
     chat: Optional[Dict[str, Any]] = None
     applicationId: Optional[str] = None
@@ -295,6 +306,119 @@ def send_leave_request_card(space_name: str, employee_email: str, supervisor_ema
         print(f"❌ Error sending leave request card: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
+def send_supervisor_approval_card(
+    supervisor_space: str,
+    request_id: str,
+    employee_name: str,
+    employee_email: str,
+    leave_type: str,
+    start_date: str,
+    end_date: str,
+    reason: str
+) -> Dict[str, Any]:
+    """Send an interactive leave approval card to supervisor with approve/decline buttons"""
+    if not chat_service:
+        raise HTTPException(status_code=500, detail="Google Chat service not initialized")
+    
+    try:
+        # Build approval card with approve and decline buttons
+        card = {
+            "cards": [{
+                "header": {
+                    "title": "Leave Request Approval",
+                    "subtitle": f"Request ID: {request_id}"
+                },
+                "sections": [
+                    {
+                        "widgets": [
+                            {
+                                "decoratedText": {
+                                    "topLabel": "Employee",
+                                    "text": f"{employee_name} ({employee_email})"
+                                }
+                            },
+                            {
+                                "decoratedText": {
+                                    "topLabel": "Leave Type",
+                                    "text": leave_type
+                                }
+                            },
+                            {
+                                "decoratedText": {
+                                    "topLabel": "Start Date",
+                                    "text": start_date
+                                }
+                            },
+                            {
+                                "decoratedText": {
+                                    "topLabel": "End Date",
+                                    "text": end_date
+                                }
+                            },
+                            {
+                                "decoratedText": {
+                                    "topLabel": "Reason",
+                                    "text": reason
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "widgets": [
+                            {
+                                "buttons": [
+                                    {
+                                        "textButton": {
+                                            "text": "✅ Approve",
+                                            "onClick": {
+                                                "action": {
+                                                    "actionMethodName": "APPROVE_LEAVE",
+                                                    "parameters": [
+                                                        {"key": "request_id", "value": request_id},
+                                                        {"key": "employee_email", "value": employee_email}
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "textButton": {
+                                            "text": "❌ Decline",
+                                            "onClick": {
+                                                "action": {
+                                                    "actionMethodName": "DECLINE_LEAVE",
+                                                    "parameters": [
+                                                        {"key": "request_id", "value": request_id},
+                                                        {"key": "employee_email", "value": employee_email}
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }]
+        }
+        
+        response = chat_service.spaces().messages().create(
+            parent=supervisor_space,
+            body=card
+        ).execute()
+        
+        return {
+            "success": True,
+            "messageId": response.get('name'),
+            "space": supervisor_space,
+            "request_id": request_id,
+            "card": card
+        }
+    except Exception as error:
+        print(f"❌ Error sending supervisor approval card: {error}")
+        raise HTTPException(status_code=500, detail=str(error))
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
@@ -386,6 +510,27 @@ async def send_leave_card_endpoint(request: SendLeaveCardRequest):
         print(f"❌ Error in send leave card endpoint: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
+# Send supervisor approval card
+@app.post("/chat/send-approval-card")
+async def send_approval_card_endpoint(request: SendApprovalCardRequest):
+    try:
+        result = send_supervisor_approval_card(
+            supervisor_space=request.supervisorSpace,
+            request_id=request.requestId,
+            employee_name=request.employeeName,
+            employee_email=request.employeeEmail,
+            leave_type=request.leaveType,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            reason=request.reason
+        )
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"❌ Error in send approval card endpoint: {error}")
+        raise HTTPException(status_code=500, detail=str(error))
+
 # Webhook handler for incoming messages
 @app.api_route("/chat/webhook", methods=["GET", "POST"])
 async def webhook_handler(request: Request):
@@ -401,10 +546,30 @@ async def webhook_handler(request: Request):
         # Always respond immediately
         response = JSONResponse(content={}, status_code=200)
         
-        # Extract event data
-        space_name = event.get("chat", {}).get("messagePayload", {}).get("space", {}).get("name")
-        message_text = event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("text")
-        sender_info = event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("sender", {})
+        # Check if this is a card click action (button interaction)
+        action_response = event.get("action", {})
+        if action_response and action_response.get("actionMethodName"):
+            print("🎯 Card button action detected")
+            # Process card button action in background
+            import asyncio
+            asyncio.create_task(process_card_button_action(event))
+            return response
+        
+        # Extract event data for regular messages
+        # Google Chat webhook format can vary, try multiple paths
+        space_name = (
+            event.get("chat", {}).get("messagePayload", {}).get("space", {}).get("name") or
+            event.get("space", {}).get("name") or
+            event.get("chat", {}).get("space", {}).get("name")
+        )
+        message_text = (
+            event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("text") or
+            event.get("message", {}).get("text")
+        )
+        sender_info = (
+            event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("sender", {}) or
+            event.get("message", {}).get("sender", {})
+        )
         sender_email = sender_info.get("email")
         sender_type = sender_info.get("type")
         sender_display_name = sender_info.get("displayName", "")
@@ -427,6 +592,122 @@ async def webhook_handler(request: Request):
     except Exception as error:
         print(f"❌ Failed to process webhook: {error}")
         return JSONResponse(content={}, status_code=200)
+
+async def process_card_button_action(event: Dict[str, Any]):
+    """Process card button click actions (approve/decline leave requests)"""
+    try:
+        action_response = event.get("action", {})
+        action_method = action_response.get("actionMethodName")
+        parameters = action_response.get("parameters", [])
+        
+        # Extract request_id and employee_email from parameters
+        param_dict = {p.get("key"): p.get("value") for p in parameters}
+        request_id = param_dict.get("request_id")
+        employee_email = param_dict.get("employee_email")
+        
+        print(f"🎯 Processing {action_method} for request {request_id}")
+        
+        # Import database utilities
+        from agents.utils import db_util
+        
+        # Get leave request details
+        leave_request = db_util.get_leave_request(request_id)
+        
+        if not leave_request:
+            print(f"❌ Leave request {request_id} not found")
+            return
+        
+        # Determine new status based on action
+        if action_method == "APPROVE_LEAVE":
+            new_status = "APPROVED"
+            decision_note = "Leave request approved by supervisor"
+        elif action_method == "DECLINE_LEAVE":
+            new_status = "DECLINED"
+            decision_note = "Leave request declined by supervisor"
+        else:
+            print(f"❌ Unknown action method: {action_method}")
+            return
+        
+        # Update leave request status in database
+        success = db_util.update_leave_request_status(request_id, new_status, decision_note)
+        
+        if not success:
+            print(f"❌ Failed to update leave request status")
+            return
+        
+        # Get supervisor space and employee space
+        # Try multiple paths for space name in different event formats
+        supervisor_space = (
+            event.get("chat", {}).get("space", {}).get("name") or
+            event.get("space", {}).get("name") or
+            event.get("action", {}).get("event", {}).get("space", {}).get("name")
+        )
+        employee_space = leave_request.get("employee_space")
+        
+        # Update the card in supervisor's space to show decision
+        try:
+            message_id = event.get("action", {}).get("message", {}).get("name")
+            if message_id and supervisor_space:
+                # Update the card to show decision
+                updated_card = {
+                    "cards": [{
+                        "header": {
+                            "title": "Leave Request Approval",
+                            "subtitle": f"Request ID: {request_id}"
+                        },
+                        "sections": [
+                            {
+                                "widgets": [
+                                    {
+                                        "decoratedText": {
+                                            "topLabel": "Status",
+                                            "text": f"✅ {new_status}",
+                                            "startIcon": {
+                                                "iconUrl": "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/send/v33/24px.svg"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "decoratedText": {
+                                            "topLabel": "Employee",
+                                            "text": f"{employee_email}"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }]
+                }
+                
+                # Update the message in supervisor's space
+                chat_service.spaces().messages().update(
+                    name=message_id,
+                    body=updated_card
+                ).execute()
+                
+                print(f"✅ Updated card in supervisor space")
+        except Exception as card_error:
+            print(f"⚠️ Could not update card: {card_error}")
+        
+        # Send notification to employee's space
+        if employee_space:
+            notification_message = f"Your leave request ({request_id}) has been {new_status.lower()}"
+            try:
+                send_message_to_space(employee_space, notification_message)
+                print(f"✅ Notified employee in space {employee_space}")
+            except Exception as notify_error:
+                print(f"⚠️ Could not notify employee: {notify_error}")
+        
+        # Also send notification back to supervisor's space
+        if supervisor_space:
+            confirmation_message = f"Leave request {request_id} has been {new_status.lower()} and employee has been notified."
+            try:
+                send_message_to_space(supervisor_space, confirmation_message)
+            except Exception as confirm_error:
+                print(f"⚠️ Could not send confirmation: {confirm_error}")
+        
+    except Exception as error:
+        print(f"❌ Failed to process card button action: {error}")
 
 async def process_webhook_message(space_name: str, message_text: str, sender_email: str, sender_display_name: str = ""):
     """Process webhook message with Mira agent"""

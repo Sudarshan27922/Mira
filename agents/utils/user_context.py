@@ -36,7 +36,7 @@ def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict
             result = conn.execute(
                 text("""
                     SELECT emp_name, emp_email, designation, emp_type, business_unit, 
-                           is_resigning, resignation_date, manager_email
+                           is_resigning, resignation_date, manager_email, chat_id
                     FROM public.employee 
                     WHERE emp_email = :email 
                     LIMIT 1
@@ -62,13 +62,53 @@ def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict
                     "business_unit": row.business_unit,
                     "is_resigning": row.is_resigning,
                     "resignation_date": str(row.resignation_date) if row.resignation_date else None,
-                    "manager_email": row.manager_email
+                    "manager_email": row.manager_email,
+                    "chat_id": row.chat_id if hasattr(row, 'chat_id') else None
                 }
             
             return None
             
     except Exception as e:
         print(f"Error retrieving user context: {e}")
+        return None
+
+def get_supervisor_info(supervisor_email: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve supervisor information including chat_id.
+    
+    Args:
+        supervisor_email: Supervisor's email address (manager_email from employee table)
+        
+    Returns:
+        Dict with supervisor information including chat_id, or None if not found
+    """
+    try:
+        engine = _get_engine()
+        
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("""
+                    SELECT emp_email, chat_id, emp_name
+                    FROM public.employee 
+                    WHERE emp_email = :email 
+                    LIMIT 1
+                """),
+                {"email": supervisor_email}
+            )
+            
+            row = result.fetchone()
+            
+            if row:
+                return {
+                    "supervisor_email": row.emp_email,
+                    "chat_id": row.chat_id if hasattr(row, 'chat_id') else None,
+                    "supervisor_name": row.emp_name if hasattr(row, 'emp_name') else None
+                }
+            
+            return None
+            
+    except Exception as e:
+        print(f"Error retrieving supervisor info: {e}")
         return None
 
 def format_user_context_for_prompt(user_context: Dict[str, Any]) -> str:

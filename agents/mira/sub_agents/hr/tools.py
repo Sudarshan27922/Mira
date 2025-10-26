@@ -183,21 +183,125 @@ def query_user_calendar(start_date: str, end_date: str, user_email: str = "") ->
 
 @tool
 def send_supervisor_approval(request_id: str, supervisor_email: str, summary: str) -> Dict[str, Any]:
-    """Send a Google Chat card to supervisor asking approval for the given request_id. Returns status placeholder.
-
-    This is a stub; implement Google Chat card send and callback correlation later.
+    """Send a Google Chat card to supervisor asking approval for the leave request.
+    
+    Args:
+        request_id: Unique leave request identifier
+        supervisor_email: Supervisor's email address
+        summary: Summary of the request (legacy parameter)
+    
+    Returns:
+        Dict with status, request_id, and supervisor_email
     """
-    return {"status": "SENT", "request_id": request_id, "supervisor_email": supervisor_email}
+    try:
+        # Import utilities
+        from agents.utils import db_util, user_context
+        import httpx
+        
+        # Get leave request details from database
+        leave_request = db_util.get_leave_request(request_id)
+        
+        if not leave_request:
+            print(f"❌ Leave request {request_id} not found in database")
+            return {"status": "ERROR", "request_id": request_id, "error": "Request not found"}
+        
+        # Get supervisor info including chat_id
+        supervisor_info = user_context.get_supervisor_info(supervisor_email)
+        
+        if not supervisor_info:
+            print(f"❌ Supervisor {supervisor_email} not found in database")
+            return {"status": "ERROR", "request_id": request_id, "error": "Supervisor not found"}
+        
+        supervisor_space = supervisor_info.get("chat_id")
+        
+        if not supervisor_space:
+            print(f"❌ Supervisor {supervisor_email} has no chat_id configured")
+            return {"status": "ERROR", "request_id": request_id, "error": "Supervisor chat_id not configured"}
+        
+        # Get employee name from database
+        employee_info = user_context.get_user_context_from_db(leave_request.get("employee_email"))
+        employee_name = employee_info.get("emp_name", leave_request.get("employee_email")) if employee_info else leave_request.get("employee_email")
+        
+        # Send approval card via API
+        import os
+        port = int(os.getenv("PORT", 3005))
+        
+        async def send_card():
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"http://localhost:{port}/chat/send-approval-card",
+                    json={
+                        "requestId": request_id,
+                        "employeeEmail": leave_request.get("employee_email"),
+                        "employeeName": employee_name,
+                        "supervisorEmail": supervisor_email,
+                        "supervisorSpace": supervisor_space,
+                        "leaveType": leave_request.get("leave_type"),
+                        "startDate": leave_request.get("start_date"),
+                        "endDate": leave_request.get("end_date"),
+                        "reason": leave_request.get("reason")
+                    }
+                )
+                return response.json()
+        
+        # Run the async function
+        import asyncio
+        result = asyncio.run(send_card())
+        
+        if result.get("success"):
+            print(f"✅ Sent approval card to supervisor {supervisor_email}")
+            return {"status": "SENT", "request_id": request_id, "supervisor_email": supervisor_email}
+        else:
+            print(f"❌ Failed to send approval card: {result}")
+            return {"status": "ERROR", "request_id": request_id, "error": "Failed to send card"}
+            
+    except Exception as e:
+        print(f"❌ Error sending supervisor approval: {e}")
+        return {"status": "ERROR", "request_id": request_id, "error": str(e)}
 
 
 @tool
 def record_leave_request(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Record or update a leave request in persistence. Returns {'request_id': '...'}.
+    """Record or update a leave request in the database. Returns {'request_id': '...', 'status': '...'}.
 
-    This is a stub; wire to DB later. Generates a deterministic-ish placeholder id when missing.
+    Args:
+        payload: Dict containing leave request details including:
+            - request_id: Optional unique identifier
+            - employee_email: Employee email
+            - supervisor_email: Supervisor email
+            - leave_type: Type of leave
+            - start_date: Start date (YYYY-MM-DD)
+            - end_date: End date (YYYY-MM-DD)
+            - reason: Reason for leave
+            - employee_space: Employee's Google Chat space ID
+            - status: Request status (default: PENDING)
     """
-    request_id = payload.get("request_id") or f"req_{abs(hash(str(payload))) % (10**8)}"
-    return {"request_id": request_id, "status": payload.get("status", "CREATED")}
+    try:
+        from agents.utils import db_util
+        
+        # Generate request_id if not provided
+        request_id = payload.get("request_id") or f"req_{abs(hash(str(payload))) % (10**8)}"
+        
+        # Create or update leave request in database
+        result = db_util.create_leave_request({
+            "request_id": request_id,
+            "employee_email": payload.get("employee_email"),
+            "supervisor_email": payload.get("supervisor_email"),
+            "leave_type": payload.get("leave_type"),
+            "start_date": payload.get("start_date"),
+            "end_date": payload.get("end_date"),
+            "reason": payload.get("reason"),
+            "employee_space": payload.get("employee_space"),
+            "status": payload.get("status", "PENDING")
+        })
+        
+        return {"request_id": request_id, "status": result.get("status", "CREATED")}
+        
+    except Exception as e:
+        print(f"❌ Error recording leave request: {e}")
+        # Fallback to generating request_id on error
+        request_id = payload.get("request_id") or f"req_{abs(hash(str(payload))) % (10**8)}"
+        return {"request_id": request_id, "status": "ERROR", "error": str(e)}
 
 
 @tool
@@ -219,7 +323,8 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
         }
     
     # All data is complete - proceed with workflow
-        rec = record_leave_request.invoke({"payload": {**payload, "status": "COLLECTED"}})
+        # Include employee_space (from space_name parameter) in the payload
+        rec = record_leave_request.invoke({"payload": {**payload, "employee_space": space_name, "status": "PENDING"}})
         request_id = rec["request_id"]
 
         conflicts = check_calendar_conflicts.invoke({
