@@ -258,8 +258,32 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
             sys.path.insert(0, server_path)
         
         try:
-            from main import send_supervisor_approval_card
+            # Initialize Google services first
+            print(f"   Initializing Google Chat service...")
+            from google.auth.transport.requests import Request as GoogleRequest
+            from google.oauth2 import service_account
+            from googleapiclient.discovery import build
             
+            service_account_file = os.getenv("SERVICE_ACCOUNT_KEY_FILE", "./service-account-key.json")
+            
+            credentials = service_account.Credentials.from_service_account_file(
+                service_account_file,
+                scopes=[
+                    "https://www.googleapis.com/auth/chat.bot",
+                    "https://www.googleapis.com/auth/chat.messages",
+                    "https://www.googleapis.com/auth/chat.spaces",
+                ]
+            )
+            
+            from main import send_supervisor_approval_card, chat_service
+            
+            # Inject the initialized chat_service
+            import sys
+            server_module = sys.modules.get('main')
+            if server_module:
+                server_module.chat_service = build('chat', 'v1', credentials=credentials)
+            
+            print(f"   Google Chat service initialized")
             print(f"   Target Space: {supervisor_space}")
             print(f"   Card Details:")
             print(f"      - Employee: {employee_name} ({leave_request.get('employee_email')})")
