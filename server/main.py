@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from agents.mira.mira import main_agent
-from agents.utils.user_context import get_user_context_from_db
+from agents.utils.user_context import get_user_context_from_db, set_user_chat_id
 
 # Load environment variables
 load_dotenv()
@@ -434,12 +434,24 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
         print(f"💡 Processing message with Mira: \"{message_text}\"")
         print(f"👤 From: {sender_display_name} ({sender_email})")
         
-        # Retrieve user context from database
+        # Retrieve user context from database (by email first, then by chat_id)
         user_context = get_user_context_from_db(sender_email, space_name)
         if user_context:
             print(f"✅ Found user context: {user_context.get('emp_name', 'Unknown')} ({user_context.get('designation', 'Unknown')})")
+            # Persist chat_id if not already saved
+            if not user_context.get("chat_id") and sender_email and space_name:
+                updated = set_user_chat_id(sender_email, space_name)
+                if updated:
+                    print(f"✅ Stored chat_id for {sender_email}: {space_name}")
+                else:
+                    print(f"ℹ️ chat_id already set or employee not found for {sender_email}")
         else:
             print(f"⚠️ No user context found for {sender_email}")
+            # Attempt to persist chat_id for future lookups if we have an email
+            if sender_email and space_name:
+                updated = set_user_chat_id(sender_email, space_name)
+                if updated:
+                    print(f"✅ Stored chat_id for {sender_email} even though context wasn't returned yet")
         
         # Get response from Mira agent with user context and space name
         agent_response = main_agent(message_text, user_context, space_name)
