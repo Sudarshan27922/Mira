@@ -71,9 +71,12 @@ def query_user_calendar(start_date: str, end_date: str, user_email: str = "") ->
     - View user's schedule for coordination
     - Identify potential conflicts before scheduling
     
+    CRITICAL: start_date and end_date MUST be in YYYY-MM-DD format (e.g., '2025-10-27').
+    DO NOT pass relative dates like 'tomorrow' or 'Monday' - always convert to YYYY-MM-DD first.
+    
     Args:
-        start_date: Start date in YYYY-MM-DD format
-        end_date: End date in YYYY-MM-DD format
+        start_date: Start date in YYYY-MM-DD format (e.g., '2025-10-27'), NOT relative
+        end_date: End date in YYYY-MM-DD format (e.g., '2025-10-27'), NOT relative
         user_email: User's email (required - use user_context['emp_email'])
         
     Returns:
@@ -85,6 +88,16 @@ def query_user_calendar(start_date: str, end_date: str, user_email: str = "") ->
     """
     try:
         from agents.utils.calendar_utils import get_user_calendar_events
+        import re
+        
+        # Validate date format - must be YYYY-MM-DD
+        date_pattern = r'^\d{4}-\d{2}-\d{2}$'
+        if not re.match(date_pattern, start_date) or not re.match(date_pattern, end_date):
+            return {
+                "status": "error",
+                "error": "Invalid date format",
+                "message": f"Dates must be in YYYY-MM-DD format. Received: start_date='{start_date}', end_date='{end_date}'"
+            }
         
         # If no user_email provided, this will fail - HR agent should always provide it
         if not user_email:
