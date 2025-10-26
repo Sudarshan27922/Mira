@@ -1,14 +1,64 @@
 from typing import Dict, Any
 from langchain_core.tools import tool
+import os
 
 
 @tool
 def check_calendar_conflicts(user_email: str, start_date: str, end_date: str) -> Dict[str, Any]:
-    """Check Google Calendar for conflicts within the given date range for the user. Returns {'conflicts': [...]}.
-
-    This is a stub; implement Google Calendar API lookup later.
+    """Check Google Calendar for conflicts within the given date range for the user.
+    
+    Args:
+        user_email: User's email address
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        
+    Returns:
+        Dict with conflicts list and metadata
     """
-    return {"conflicts": []}
+    try:
+        # Import here to avoid circular dependencies
+        from agents.utils.calendar_utils import get_user_calendar_events, format_conflicts_message
+        
+        # Get configuration from environment
+        use_domain_delegation = os.getenv("USE_DOMAIN_DELEGATION", "true").lower() == "true"
+        
+        # Check calendar for events
+        result = get_user_calendar_events(user_email, start_date, end_date, use_domain_delegation)
+        
+        if result.get("status") == "error":
+            print(f"⚠️ Calendar check failed: {result.get('error')}")
+            # Return no conflicts on error to not block the workflow
+            return {
+                "conflicts": [],
+                "error": result.get("error"),
+                "status": "error"
+            }
+        
+        conflicts = result.get("conflicts", [])
+        
+        if conflicts:
+            conflicts_message = format_conflicts_message(conflicts)
+            return {
+                "conflicts": conflicts,
+                "total": len(conflicts),
+                "message": conflicts_message,
+                "status": "conflicts_found"
+            }
+        
+        return {
+            "conflicts": [],
+            "message": "No calendar conflicts found for the requested dates.",
+            "status": "no_conflicts"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in check_calendar_conflicts: {str(e)}")
+        # Return no conflicts on error to not block the workflow
+        return {
+            "conflicts": [],
+            "error": str(e),
+            "status": "error"
+        }
 
 
 @tool
@@ -31,31 +81,54 @@ def record_leave_request(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @tool
-def leave_process_workflow(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Composite workflow: validate -> check conflicts -> (maybe) request decision -> approval -> finalize.
+def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dict[str, Any]:
+    """Process complete leave request workflow: validate -> check conflicts -> approval -> finalize.
 
-    This is a stubbed synchronous version; later replace with LangGraph and persistence.
+    This function should ONLY be called when all required data is complete.
     Returns a dict with at least {'status': str, 'request_id': str}.
     """
-    required = ["employee_email", "leave_type", "start_date", "end_date", "reason", "supervisor_email"]
-    missing = [k for k in required if not payload.get(k)]
-    if missing:
-        return {"status": "MISSING_FIELDS", "missing": missing}
-
-    rec = record_leave_request.run(payload={**payload, "status": "COLLECTED"})
+    # Validate that all required fields are present
+    required_fields = ["employee_email", "leave_type", "start_date", "end_date", "reason", "supervisor_email"]
+    missing_fields = [field for field in required_fields if not payload.get(field)]
+    
+    if missing_fields:
+        return {
+            "status": "INCOMPLETE_DATA",
+            "missing": missing_fields,
+            "message": f"Missing required fields: {', '.join(missing_fields)}. Please collect all data first."
+        }
+    
+    # All data is complete - proceed with workflow
+    rec = record_leave_request.invoke({"payload": {**payload, "status": "COLLECTED"}})
     request_id = rec["request_id"]
 
-    conflicts = check_calendar_conflicts.run(payload["employee_email"], payload["start_date"], payload["end_date"])  # type: ignore[arg-type]
+    conflicts = check_calendar_conflicts.invoke({
+        "user_email": payload["employee_email"],
+        "start_date": payload["start_date"],
+        "end_date": payload["end_date"],
+    })
+    
     if conflicts.get("conflicts"):
+        conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
         return {
             "status": "WAITING_USER_DECISION",
             "request_id": request_id,
             "conflicts": conflicts["conflicts"],
-            "message": "Conflicts found. Proceed anyway or choose new dates?"
+            "total_conflicts": conflicts.get("total", len(conflicts.get("conflicts", []))),
+            "message": conflicts_message
         }
 
-    send_supervisor_approval.run(request_id, payload["supervisor_email"], "Leave approval request")  # type: ignore[arg-type]
-    return {"status": "WAITING_SUPERVISOR", "request_id": request_id}
+    send_supervisor_approval.invoke({
+        "request_id": request_id,
+        "supervisor_email": payload["supervisor_email"],
+        "summary": "Leave approval request",
+    })
+    
+    return {
+        "status": "WAITING_SUPERVISOR", 
+        "request_id": request_id,
+        "message": "Leave request submitted successfully. Waiting for supervisor approval."
+    }
 
 
 @tool
