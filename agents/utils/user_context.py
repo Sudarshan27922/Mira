@@ -17,43 +17,41 @@ def _get_engine() -> Engine:
         _engine = create_engine(url, pool_pre_ping=True)
     return _engine
 
-def get_user_context_from_db(email: Optional[str] = None, chat_id: str = None) -> Optional[Dict[str, Any]]:
+def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict[str, Any]]:
     """
     Retrieve user context from the employee database.
-    Looks up by chat_id first (if provided); if not found and email provided, looks up by email.
+    
+    Args:
+        email: Employee email address
+        chatspace: Optional chat space name for fallback lookup
+        
+    Returns:
+        Dict with user information or None if not found
     """
     try:
         engine = _get_engine()
+        
         with engine.connect() as conn:
-            row = None
-
-            # 1) Prefer lookup by chat_id
-            if chat_id:
-                result = conn.execute(
-                    text("""
-                        SELECT emp_name, emp_email, designation, emp_type, business_unit, 
-                               is_resigning, resignation_date, manager_email, chat_id
-                        FROM public.employee 
-                        WHERE chat_id = :chat_id 
-                        LIMIT 1
-                    """),
-                    {"chat_id": chat_id}
-                )
-                row = result.fetchone()
-
-            # 2) Fallback to lookup by email
-            if not row and email:
-                result = conn.execute(
-                    text("""
-                        SELECT emp_name, emp_email, designation, emp_type, business_unit, 
-                               is_resigning, resignation_date, manager_email, chat_id
-                        FROM public.employee 
-                        WHERE emp_email = :email 
-                        LIMIT 1
-                    """),
-                    {"email": email}
-                )
-                row = result.fetchone()
+            # First try to find by email
+            result = conn.execute(
+                text("""
+                    SELECT emp_name, emp_email, designation, emp_type, business_unit, 
+                           is_resigning, resignation_date, manager_email
+                    FROM public.employee 
+                    WHERE emp_email = :email 
+                    LIMIT 1
+                """),
+                {"email": email}
+            )
+            
+            row = result.fetchone()
+            
+            # If not found by email and chatspace provided, try to find by chatspace
+            if not row and chatspace:
+                # Note: This assumes there's a way to map chatspace to employee
+                # For now, we'll just return None if email lookup fails
+                # In the future, you might add a chatspace column to employee table
+                pass
             
             if row:
                 return {
@@ -64,11 +62,11 @@ def get_user_context_from_db(email: Optional[str] = None, chat_id: str = None) -
                     "business_unit": row.business_unit,
                     "is_resigning": row.is_resigning,
                     "resignation_date": str(row.resignation_date) if row.resignation_date else None,
-                    "manager_email": row.manager_email,
-                    "chat_id": row.chat_id,
-                    "chatspace": row.chat_id,  # backward compat if referenced elsewhere
+                    "manager_email": row.manager_email
                 }
+            
             return None
+            
     except Exception as e:
         print(f"Error retrieving user context: {e}")
         return None
@@ -104,25 +102,3 @@ def format_user_context_for_prompt(user_context: Dict[str, Any]) -> str:
         return f"User context: {', '.join(context_parts)}"
     
     return ""
-
-# Persist the chat_id for a user (by email)
-def set_user_chat_id(email: str, chat_id: str) -> bool:
-    """
-    Update the 'chat_id' column for the given email.
-    Returns True if a row was updated.
-    """
-    try:
-        engine = _get_engine()
-        with engine.begin() as conn:
-            res = conn.execute(
-                text("UPDATE public.employee SET chat_id = :chat_id WHERE emp_email = :email"),
-                {"chat_id": chat_id, "email": email},
-            )
-            return res.rowcount > 0
-    except Exception as e:
-        print(f"Error setting user chat_id: {e}")
-        return False
-
-# Backward-compatible wrapper (deprecated)
-def set_user_chatspace(email: str, chatspace: str) -> bool:
-    return set_user_chat_id(email, chatspace)
