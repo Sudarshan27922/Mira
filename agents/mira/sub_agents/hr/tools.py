@@ -200,13 +200,13 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
         })
     
         if conflicts.get("conflicts"):
-        conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
+            conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
             return {
                 "status": "WAITING_USER_DECISION",
                 "request_id": request_id,
                 "conflicts": conflicts["conflicts"],
-            "total_conflicts": conflicts.get("total", len(conflicts.get("conflicts", []))),
-            "message": conflicts_message
+                "total_conflicts": conflicts.get("total", len(conflicts.get("conflicts", []))),
+                "message": conflicts_message
             }
 
         send_supervisor_approval.invoke({
@@ -215,10 +215,10 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
             "summary": "Leave approval request",
         })
     
-            return {
-        "status": "WAITING_SUPERVISOR", 
-                "request_id": request_id,
-        "message": "Leave request submitted successfully. Waiting for supervisor approval."
+        return {
+            "status": "WAITING_SUPERVISOR", 
+            "request_id": request_id,
+            "message": "Leave request submitted successfully. Waiting for supervisor approval."
         }
 
 

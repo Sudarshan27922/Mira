@@ -58,6 +58,7 @@ def get_user_calendar_events(
         # Convert dates to RFC3339 format
         start_datetime = f"{start_date}T00:00:00Z"
         end_datetime = f"{end_date}T23:59:59Z"
+        print(f"📅 Querying calendar from {start_datetime} to {end_datetime}")
         
         # If using domain-wide delegation, create delegated credentials
         if use_domain_delegation:
@@ -96,6 +97,12 @@ def get_user_calendar_events(
         
         events = events_result.get('items', [])
         print(f"🔍 Found {len(events)} total events in calendar")
+        
+        # Debug: Show first few events
+        for i, event in enumerate(events[:3]):
+            summary = event.get('summary', 'Untitled')
+            start = event.get('start', {})
+            print(f"   Event {i+1}: {summary} - {start}")
         
         # Filter and format conflicts
         conflicts = []
