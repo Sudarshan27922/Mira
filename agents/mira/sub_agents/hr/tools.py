@@ -194,18 +194,33 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
         Dict with status, request_id, and supervisor_email
     """
     try:
+        print(f"\n{'='*70}")
+        print(f"📤 STEP 1: Starting supervisor approval workflow")
+        print(f"   Request ID: {request_id}")
+        print(f"   Supervisor Email: {supervisor_email}")
+        print(f"{'='*70}\n")
+        
         # Import utilities
         from agents.utils import db_util, user_context
         import httpx
         
         # Get leave request details from database
+        print(f"📋 STEP 2: Retrieving leave request from database...")
         leave_request = db_util.get_leave_request(request_id)
         
         if not leave_request:
             print(f"❌ Leave request {request_id} not found in database")
             return {"status": "ERROR", "request_id": request_id, "error": "Request not found"}
         
+        print(f"✅ Retrieved leave request:")
+        print(f"   Employee: {leave_request.get('employee_email')}")
+        print(f"   Leave Type: {leave_request.get('leave_type')}")
+        print(f"   Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
+        print(f"   Current Status: {leave_request.get('status')}")
+        
         # Get supervisor info including chat_id
+        print(f"\n🔍 STEP 3: Looking up supervisor information...")
+        print(f"   Searching for: {supervisor_email}")
         supervisor_info = user_context.get_supervisor_info(supervisor_email)
         
         if not supervisor_info:
@@ -213,18 +228,37 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
             return {"status": "ERROR", "request_id": request_id, "error": "Supervisor not found"}
         
         supervisor_space = supervisor_info.get("chat_id")
+        supervisor_name = supervisor_info.get("supervisor_name", supervisor_email)
+        
+        print(f"✅ Found supervisor:")
+        print(f"   Name: {supervisor_name}")
+        print(f"   Email: {supervisor_info.get('supervisor_email')}")
         
         if not supervisor_space:
             print(f"❌ Supervisor {supervisor_email} has no chat_id configured")
             return {"status": "ERROR", "request_id": request_id, "error": "Supervisor chat_id not configured"}
         
+        print(f"   Chat ID: {supervisor_space}")
+        
         # Get employee name from database
+        print(f"\n👤 STEP 4: Retrieving employee information...")
         employee_info = user_context.get_user_context_from_db(leave_request.get("employee_email"))
         employee_name = employee_info.get("emp_name", leave_request.get("employee_email")) if employee_info else leave_request.get("employee_email")
         
+        print(f"✅ Employee: {employee_name} ({leave_request.get('employee_email')})")
+        
         # Send approval card via API
+        print(f"\n📨 STEP 5: Preparing to send approval card...")
         import os
         port = int(os.getenv("PORT", 3005))
+        
+        print(f"   API Endpoint: http://localhost:{port}/chat/send-approval-card")
+        print(f"   Target Space: {supervisor_space}")
+        print(f"   Card Details:")
+        print(f"      - Employee: {employee_name} ({leave_request.get('employee_email')})")
+        print(f"      - Leave Type: {leave_request.get('leave_type')}")
+        print(f"      - Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
+        print(f"      - Reason: {leave_request.get('reason')}")
         
         async def send_card():
             async with httpx.AsyncClient() as client:
@@ -245,18 +279,35 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
                 return response.json()
         
         # Run the async function
+        print(f"\n🚀 STEP 6: Sending approval card to supervisor...")
         import asyncio
         result = asyncio.run(send_card())
         
         if result.get("success"):
-            print(f"✅ Sent approval card to supervisor {supervisor_email}")
+            print(f"✅ SUCCESS: Approval card sent to supervisor!")
+            print(f"   Message ID: {result.get('messageId')}")
+            print(f"   Space: {result.get('space')}")
+            print(f"   Request ID: {request_id}")
+            print(f"\n{'='*70}")
+            print(f"✅ Leave approval workflow completed successfully")
+            print(f"{'='*70}\n")
             return {"status": "SENT", "request_id": request_id, "supervisor_email": supervisor_email}
         else:
-            print(f"❌ Failed to send approval card: {result}")
+            print(f"❌ FAILED: Could not send approval card")
+            print(f"   Error: {result}")
+            print(f"\n{'='*70}")
+            print(f"❌ Leave approval workflow failed")
+            print(f"{'='*70}\n")
             return {"status": "ERROR", "request_id": request_id, "error": "Failed to send card"}
             
     except Exception as e:
-        print(f"❌ Error sending supervisor approval: {e}")
+        print(f"\n❌ EXCEPTION: Error in supervisor approval workflow")
+        print(f"   Error: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"\n{'='*70}")
+        print(f"❌ Leave approval workflow failed with exception")
+        print(f"{'='*70}\n")
         return {"status": "ERROR", "request_id": request_id, "error": str(e)}
 
 

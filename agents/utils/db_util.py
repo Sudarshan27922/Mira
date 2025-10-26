@@ -37,6 +37,11 @@ def create_leave_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
         Dict with request_id and status
     """
     try:
+        print(f"\n💾 DATABASE: Creating leave request...")
+        print(f"   Request ID: {request_data.get('request_id')}")
+        print(f"   Employee: {request_data.get('employee_email')}")
+        print(f"   Supervisor: {request_data.get('supervisor_email')}")
+        print(f"   Status: {request_data.get('status', 'PENDING')}")
         engine = _get_engine()
         
         with engine.connect() as conn:
@@ -83,9 +88,11 @@ def create_leave_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
                     }
                 )
                 conn.commit()
+                print(f"✅ DATABASE: Updated existing leave request")
                 return {"request_id": request_id, "status": "UPDATED"}
             else:
                 # Insert new request
+                print(f"   INSERT: Creating new leave request record")
                 conn.execute(
                     text("""
                         INSERT INTO public.leave_requests 
@@ -108,10 +115,11 @@ def create_leave_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
                     }
                 )
                 conn.commit()
+                print(f"✅ DATABASE: Created new leave request successfully")
                 return {"request_id": request_id, "status": "CREATED"}
                 
     except Exception as e:
-        print(f"Error creating leave request: {e}")
+        print(f"❌ DATABASE ERROR: Failed to create leave request: {e}")
         raise
 
 def get_leave_request(request_id: str) -> Optional[Dict[str, Any]]:

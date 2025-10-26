@@ -321,6 +321,7 @@ def send_supervisor_approval_card(
         raise HTTPException(status_code=500, detail="Google Chat service not initialized")
     
     try:
+        print(f"\n🎴 Building approval card structure...")
         # Build approval card with approve and decline buttons
         card = {
             "cards": [{
@@ -403,20 +404,37 @@ def send_supervisor_approval_card(
             }]
         }
         
+        print(f"✅ Card structure built successfully")
+        print(f"   Card sections: {len(card['cards'][0]['sections'])}")
+        print(f"   Action buttons: 2 (Approve/Decline)")
+        print(f"   Target space: {supervisor_space}")
+        
+        print(f"\n🚀 Sending card to Google Chat API...")
         response = chat_service.spaces().messages().create(
             parent=supervisor_space,
             body=card
         ).execute()
         
+        message_id = response.get('name')
+        print(f"✅ Card sent successfully!")
+        print(f"   Message ID: {message_id}")
+        print(f"   Space: {supervisor_space}")
+        print(f"   Request ID: {request_id}")
+        
         return {
             "success": True,
-            "messageId": response.get('name'),
+            "messageId": message_id,
             "space": supervisor_space,
             "request_id": request_id,
             "card": card
         }
     except Exception as error:
-        print(f"❌ Error sending supervisor approval card: {error}")
+        print(f"\n❌ ERROR: Failed to send supervisor approval card")
+        print(f"   Error: {error}")
+        print(f"   Space: {supervisor_space}")
+        print(f"   Request ID: {request_id}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(error))
 
 # Startup event
@@ -514,6 +532,18 @@ async def send_leave_card_endpoint(request: SendLeaveCardRequest):
 @app.post("/chat/send-approval-card")
 async def send_approval_card_endpoint(request: SendApprovalCardRequest):
     try:
+        print(f"\n{'='*70}")
+        print(f"📨 RECEIVED: Send Approval Card API Request")
+        print(f"{'='*70}")
+        print(f"   Request ID: {request.requestId}")
+        print(f"   Employee: {request.employeeName} ({request.employeeEmail})")
+        print(f"   Supervisor: {request.supervisorEmail}")
+        print(f"   Supervisor Space: {request.supervisorSpace}")
+        print(f"   Leave Type: {request.leaveType}")
+        print(f"   Dates: {request.startDate} to {request.endDate}")
+        print(f"   Reason: {request.reason}")
+        print(f"{'='*70}\n")
+        
         result = send_supervisor_approval_card(
             supervisor_space=request.supervisorSpace,
             request_id=request.requestId,
@@ -524,11 +554,21 @@ async def send_approval_card_endpoint(request: SendApprovalCardRequest):
             end_date=request.endDate,
             reason=request.reason
         )
+        
+        print(f"\n{'='*70}")
+        print(f"✅ RESPONSE: Approval card sent successfully")
+        print(f"   Message ID: {result.get('messageId')}")
+        print(f"   Space: {result.get('space')}")
+        print(f"{'='*70}\n")
+        
         return {"success": True, **result}
     except HTTPException:
         raise
     except Exception as error:
-        print(f"❌ Error in send approval card endpoint: {error}")
+        print(f"\n{'='*70}")
+        print(f"❌ ERROR: Failed to send approval card")
+        print(f"   Error: {error}")
+        print(f"{'='*70}\n")
         raise HTTPException(status_code=500, detail=str(error))
 
 # Webhook handler for incoming messages
