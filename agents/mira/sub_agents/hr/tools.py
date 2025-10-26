@@ -246,41 +246,51 @@ def send_supervisor_approval(request_id: str, supervisor_email: str, summary: st
         
         print(f"✅ Employee: {employee_name} ({leave_request.get('employee_email')})")
         
-        # Send approval card via API
+        # Send approval card directly via function import
         print(f"\n📨 STEP 5: Preparing to send approval card...")
+        import sys
         import os
-        import requests
-        port = int(os.getenv("PORT", 3005))
         
-        print(f"   API Endpoint: http://localhost:{port}/chat/send-approval-card")
-        print(f"   Target Space: {supervisor_space}")
-        print(f"   Card Details:")
-        print(f"      - Employee: {employee_name} ({leave_request.get('employee_email')})")
-        print(f"      - Leave Type: {leave_request.get('leave_type')}")
-        print(f"      - Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
-        print(f"      - Reason: {leave_request.get('reason')}")
+        # Import the server function directly instead of making HTTP call
+        # Add server directory to path
+        server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "server")
+        if server_path not in sys.path:
+            sys.path.insert(0, server_path)
         
-        # Send approval card via synchronous HTTP request
-        print(f"\n🚀 STEP 6: Sending approval card to supervisor...")
         try:
-            response = requests.post(
-                f"http://localhost:{port}/chat/send-approval-card",
-                json={
-                    "requestId": request_id,
-                    "employeeEmail": leave_request.get("employee_email"),
-                    "employeeName": employee_name,
-                    "supervisorEmail": supervisor_email,
-                    "supervisorSpace": supervisor_space,
-                    "leaveType": leave_request.get("leave_type"),
-                    "startDate": leave_request.get("start_date"),
-                    "endDate": leave_request.get("end_date"),
-                    "reason": leave_request.get("reason")
-                }
+            from main import send_supervisor_approval_card
+            
+            print(f"   Target Space: {supervisor_space}")
+            print(f"   Card Details:")
+            print(f"      - Employee: {employee_name} ({leave_request.get('employee_email')})")
+            print(f"      - Leave Type: {leave_request.get('leave_type')}")
+            print(f"      - Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
+            print(f"      - Reason: {leave_request.get('reason')}")
+            
+            print(f"\n🚀 STEP 6: Sending approval card to supervisor...")
+            print(f"   Calling send_supervisor_approval_card() directly...")
+            
+            result = send_supervisor_approval_card(
+                supervisor_space=supervisor_space,
+                request_id=request_id,
+                employee_name=employee_name,
+                employee_email=leave_request.get("employee_email"),
+                leave_type=leave_request.get("leave_type"),
+                start_date=leave_request.get("start_date"),
+                end_date=leave_request.get("end_date"),
+                reason=leave_request.get("reason")
             )
-            result = response.json()
-        except Exception as req_error:
-            print(f"❌ HTTP Request Error: {req_error}")
-            return {"status": "ERROR", "request_id": request_id, "error": f"HTTP request failed: {str(req_error)}"}
+            
+            print(f"   Function returned successfully")
+            
+        except ImportError as imp_error:
+            print(f"❌ Could not import server functions: {imp_error}")
+            return {"status": "ERROR", "request_id": request_id, "error": f"Import error: {str(imp_error)}"}
+        except Exception as func_error:
+            print(f"❌ Error calling approval card function: {func_error}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "ERROR", "request_id": request_id, "error": f"Function call failed: {str(func_error)}"}
         
         if result.get("success"):
             print(f"✅ SUCCESS: Approval card sent to supervisor!")
