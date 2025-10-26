@@ -1,14 +1,64 @@
 from typing import Dict, Any
 from langchain_core.tools import tool
+import os
 
 
 @tool
 def check_calendar_conflicts(user_email: str, start_date: str, end_date: str) -> Dict[str, Any]:
-    """Check Google Calendar for conflicts within the given date range for the user. Returns {'conflicts': [...]}.
-
-    This is a stub; implement Google Calendar API lookup later.
+    """Check Google Calendar for conflicts within the given date range for the user.
+    
+    Args:
+        user_email: User's email address
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        
+    Returns:
+        Dict with conflicts list and metadata
     """
-    return {"conflicts": []}
+    try:
+        # Import here to avoid circular dependencies
+        from agents.utils.calendar_utils import get_user_calendar_events, format_conflicts_message
+        
+        # Get configuration from environment
+        use_domain_delegation = os.getenv("USE_DOMAIN_DELEGATION", "true").lower() == "true"
+        
+        # Check calendar for events
+        result = get_user_calendar_events(user_email, start_date, end_date, use_domain_delegation)
+        
+        if result.get("status") == "error":
+            print(f"⚠️ Calendar check failed: {result.get('error')}")
+            # Return no conflicts on error to not block the workflow
+            return {
+                "conflicts": [],
+                "error": result.get("error"),
+                "status": "error"
+            }
+        
+        conflicts = result.get("conflicts", [])
+        
+        if conflicts:
+            conflicts_message = format_conflicts_message(conflicts)
+            return {
+                "conflicts": conflicts,
+                "total": len(conflicts),
+                "message": conflicts_message,
+                "status": "conflicts_found"
+            }
+        
+        return {
+            "conflicts": [],
+            "message": "No calendar conflicts found for the requested dates.",
+            "status": "no_conflicts"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in check_calendar_conflicts: {str(e)}")
+        # Return no conflicts on error to not block the workflow
+        return {
+            "conflicts": [],
+            "error": str(e),
+            "status": "error"
+        }
 
 
 @tool
@@ -59,11 +109,13 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
     })
     
     if conflicts.get("conflicts"):
+        conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
         return {
             "status": "WAITING_USER_DECISION",
             "request_id": request_id,
             "conflicts": conflicts["conflicts"],
-            "message": "Conflicts found. Proceed anyway or choose new dates?"
+            "total_conflicts": conflicts.get("total", len(conflicts.get("conflicts", []))),
+            "message": conflicts_message
         }
 
     send_supervisor_approval.invoke({

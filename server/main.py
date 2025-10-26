@@ -39,11 +39,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/chat.bot",
     "https://www.googleapis.com/auth/chat.messages",
     "https://www.googleapis.com/auth/chat.spaces",
+    "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
 # Global variables
 auth_client = None
 chat_service = None
+calendar_service = None
 
 # Pydantic models
 class SendMessageRequest(BaseModel):
@@ -73,7 +75,7 @@ class WebhookEvent(BaseModel):
 
 # Initialize Google Auth and Chat service
 def initialize_google_services():
-    global auth_client, chat_service
+    global auth_client, chat_service, calendar_service
     try:
         if os.path.exists(SERVICE_ACCOUNT_FILE):
             credentials = service_account.Credentials.from_service_account_file(
@@ -81,7 +83,8 @@ def initialize_google_services():
             )
             auth_client = credentials
             chat_service = build('chat', 'v1', credentials=credentials)
-            print("✅ Google Chat services initialized successfully")
+            calendar_service = build('calendar', 'v3', credentials=credentials)
+            print("✅ Google Chat and Calendar services initialized successfully")
         else:
             print("❌ Service account file not found")
     except Exception as error:
