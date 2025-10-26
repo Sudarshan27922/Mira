@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from agents.mira.mira import main_agent
-from agents.utils.user_context import get_user_context_from_db
+from agents.utils.user_context import get_user_context_from_db, set_user_chat_id
 
 # Load environment variables
 load_dotenv()
@@ -389,116 +389,66 @@ async def send_leave_card_endpoint(request: SendLeaveCardRequest):
 # Webhook handler for incoming messages
 @app.api_route("/chat/webhook", methods=["GET", "POST"])
 async def webhook_handler(request: Request):
+    # Parse Google Chat event payload
     try:
-        # Handle GET requests (for testing)
-        if request.method == "GET":
-            return {"success": True, "message": "Webhook endpoint is active"}
-        
-        # Handle POST requests (incoming messages)
         event = await request.json()
-        print("🔔 Incoming webhook event:", json.dumps(event, indent=2))
-        
-        # Always respond immediately
-        response = JSONResponse(content={}, status_code=200)
-        
-        # Extract event data
-        space_name = event.get("chat", {}).get("messagePayload", {}).get("space", {}).get("name")
-        message_text = event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("text")
-        sender_info = event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("sender", {})
-        sender_email = sender_info.get("email")
-        sender_type = sender_info.get("type")
-        sender_display_name = sender_info.get("displayName", "")
-        
-        if not space_name or not message_text:
-            print("⚠️ No space name or message text found in event")
-            return response
-        
-        # Skip processing if the message is from the bot itself
-        if sender_type == "BOT":
-            print("🤖 Skipping bot message")
-            return response
+    except Exception:
+        return JSONResponse({"text": "Invalid payload"}, status_code=400)
 
-        # Process in background
-        import asyncio
-        asyncio.create_task(process_webhook_message(space_name, message_text, sender_email, sender_display_name))
-        
-        return response
-        
-    except Exception as error:
-        print(f"❌ Failed to process webhook: {error}")
-        return JSONResponse(content={}, status_code=200)
+    # Extract fields safely for both DM and room events
+    msg = event.get("message", {}) or {}
+    space = msg.get("space", {}) or event.get("space", {}) or {}
+    user = msg.get("sender", {}) or event.get("user", {}) or {}
+
+    space_name = space.get("name")  # This is your chat_id (e.g., "spaces/AAAA.../threads/...")
+    message_text = msg.get("argumentText") or msg.get("text") or ""
+    sender_email = user.get("email") or ""
+    sender_display_name = user.get("displayName") or ""
+
+    # Process asynchronously (simple inline await here; could offload to a task queue if needed)
+    await process_webhook_message(space_name, message_text, sender_email, sender_display_name)
+
+    # Respond quickly to Chat
+    return JSONResponse({"text": "Processing your request..."}, status_code=200)
 
 async def process_webhook_message(space_name: str, message_text: str, sender_email: str, sender_display_name: str = ""):
     """Process webhook message with Mira agent"""
     try:
-        print(f"💡 Processing message with Mira: \"{message_text}\"")
-        print(f"👤 From: {sender_display_name} ({sender_email})")
-        
-        # Retrieve user context from database
-        user_context = get_user_context_from_db(sender_email, space_name)
-        if user_context:
-            print(f"✅ Found user context: {user_context.get('emp_name', 'Unknown')} ({user_context.get('designation', 'Unknown')})")
-        else:
-            print(f"⚠️ No user context found for {sender_email}")
-        
-        # Get response from Mira agent with user context and space name
-        agent_response = main_agent(message_text, user_context, space_name)
-        
-        if agent_response:
-            print(f"💬 Sending Mira response to {space_name}...")
-            
-            # Send response using internal API
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": agent_response
-                })
-            
-            print(f"✅ Replied to {space_name} with Mira's response.")
-        else:
-            print("❌ No response from Mira agent")
-            
-            # Send fallback message
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": "I'm sorry, I couldn't process your request. Please try again."
-                })
-    
-    except Exception as error:
-        print(f"❌ Failed to process webhook message: {error}")
-        
-        # Send error message
-        try:
-            async with httpx.AsyncClient() as client:
-                await client.post(f"http://localhost:{PORT}/chat/send", json={
-                    "spaceName": space_name,
-                    "message": "I'm sorry, I'm having trouble processing your request right now. Please try again later."
-                })
-        except Exception as send_error:
-            print(f"❌ Failed to send error message: {send_error}")
+        print(f"💡 Message: {message_text}")
+        print(f"👤 Sender: {sender_display_name} ({sender_email})")
+        print(f"💬 Space: {space_name}")
 
-if __name__ == "__main__":
-    import uvicorn
-    
-    print("🚀 Starting Mira Workplace Assistant Bot...")
-    print(f"📡 Server will run on http://localhost:{PORT}")
-    print("")
-    print("📡 Available Endpoints:")
-    print("   GET  /                        → Health check")
-    print("   GET  /chat/spaces             → List all spaces")
-    print("   POST /chat/send               → Send message to space")
-    print("   POST /chat/broadcast          → Broadcast to all spaces")
-    print("   POST /chat/send-card          → Send rich card to space")
-    print("   POST /chat/send-leave-card    → Send interactive leave request card")
-    print("   POST /chat/webhook            → Handle incoming messages")
-    print("")
-    print("💬 Mira is ready to help with:")
-    print("   - Company policy questions")
-    print("   - HR assistance")
-    print("   - IT support")
-    print("   - Resource management")
-    print("   - General workplace queries")
-    print("")
-    
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+        # 1) Try to find user by chat_id first
+        user_context = get_user_context_from_db(email=None, chat_id=space_name)
+
+        # 2) If not found by chat_id, try by email, then persist chat_id
+        if not user_context and sender_email:
+            email_context = get_user_context_from_db(email=sender_email, chat_id=None)
+            if email_context:
+                linked = set_user_chat_id(sender_email, space_name)
+                if linked:
+                    print(f"✅ Stored chat_id for {sender_email}: {space_name}")
+                else:
+                    print(f"ℹ️ No DB row updated for {sender_email} (check employee table).")
+                # Use that context and reflect the current chat_id
+                email_context["chat_id"] = space_name
+                user_context = email_context
+
+        if not user_context:
+            print("⚠️ No user context found by chat_id or email.")
+        
+        # 3) Route to main agent with user context and chat_id
+        agent_response = main_agent(message_text, user_context, space_name)
+
+        # Optionally, echo the response to Chat if chat_service is initialized
+        if chat_service and space_name and agent_response:
+            try:
+                chat_service.spaces().messages().create(
+                    parent=space_name,
+                    body={'text': agent_response if isinstance(agent_response, str) else json.dumps(agent_response)}
+                ).execute()
+            except Exception as send_err:
+                print(f"❌ Error sending reply to Chat: {send_err}")
+
+    except Exception as error:
+        print(f"❌ Error processing webhook message: {error}")
