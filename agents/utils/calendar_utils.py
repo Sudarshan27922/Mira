@@ -6,8 +6,13 @@ import os
 
 def get_calendar_service():
     """Get the calendar service instance from main.py"""
-    from server.main import calendar_service
-    return calendar_service
+    try:
+        # Import here to avoid circular import issues during initialization
+        import server.main as main_module
+        return main_module.calendar_service
+    except (ImportError, AttributeError) as e:
+        print(f"⚠️ Calendar service not available: {e}")
+        return None
 
 
 def get_user_calendar_events(
