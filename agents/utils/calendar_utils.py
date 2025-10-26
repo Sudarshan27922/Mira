@@ -5,14 +5,22 @@ import os
 
 
 def get_calendar_service():
-    """Get the calendar service instance from main.py"""
-    try:
-        # Import here to avoid circular import issues during initialization
-        import server.main as main_module
+    """Get or create the calendar service instance"""
+    import server.main as main_module
+    # Check if calendar_service exists and is not None
+    if hasattr(main_module, 'calendar_service') and main_module.calendar_service is not None:
         return main_module.calendar_service
-    except (ImportError, AttributeError) as e:
-        print(f"⚠️ Calendar service not available: {e}")
-        return None
+    
+    # If not initialized, try to initialize it now
+    print("⚠️ Calendar service not initialized, attempting to initialize now...")
+    try:
+        if hasattr(main_module, 'initialize_google_services'):
+            main_module.initialize_google_services()
+            return main_module.calendar_service
+    except Exception as e:
+        print(f"❌ Failed to initialize calendar service: {e}")
+    
+    return None
 
 
 def get_user_calendar_events(
@@ -34,14 +42,18 @@ def get_user_calendar_events(
         Dict with conflicts list and metadata
     """
     try:
+        print(f"🔍 Checking calendar for user: {user_email}, dates: {start_date} to {end_date}")
         calendar_service = get_calendar_service()
         
         if not calendar_service:
+            print("❌ Calendar service is None or not found")
             return {
                 "status": "error",
-                "error": "Calendar service not initialized",
+                "error": "Calendar service not initialized. Please restart the server.",
                 "conflicts": []
             }
+        
+        print(f"✅ Calendar service retrieved successfully")
         
         # Convert dates to RFC3339 format
         start_datetime = f"{start_date}T00:00:00Z"
