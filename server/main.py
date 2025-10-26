@@ -374,12 +374,8 @@ def send_supervisor_approval_card(
                                         "textButton": {
                                             "text": "Approve",
                                             "onClick": {
-                                                "action": {
-                                                    "actionMethodName": "APPROVE_LEAVE",
-                                                    "parameters": [
-                                                        {"key": "request_id", "value": request_id},
-                                                        {"key": "employee_email", "value": employee_email}
-                                                    ]
+                                                "openLink": {
+                                                    "url": f"http://localhost:3005/chat/process-approval?request_id={request_id}&action=APPROVE&space={supervisor_space}"
                                                 }
                                             }
                                         }
@@ -388,12 +384,8 @@ def send_supervisor_approval_card(
                                         "textButton": {
                                             "text": "Decline",
                                             "onClick": {
-                                                "action": {
-                                                    "actionMethodName": "DECLINE_LEAVE",
-                                                    "parameters": [
-                                                        {"key": "request_id", "value": request_id},
-                                                        {"key": "employee_email", "value": employee_email}
-                                                    ]
+                                                "openLink": {
+                                                    "url": f"http://localhost:3005/chat/process-approval?request_id={request_id}&action=DECLINE&space={supervisor_space}"
                                                 }
                                             }
                                         }
@@ -572,6 +564,69 @@ async def send_approval_card_endpoint(request: SendApprovalCardRequest):
         print(f"   Error: {error}")
         print(f"{'='*70}\n")
         raise HTTPException(status_code=500, detail=str(error))
+
+# Process approval/decline from button clicks
+@app.get("/chat/process-approval")
+async def process_approval_button(request: Request):
+    """Process approval/decline when button is clicked - receives GET request with query params"""
+    try:
+        from fastapi import Query
+        
+        request_id = request.query_params.get("request_id")
+        action = request.query_params.get("action")
+        space = request.query_params.get("space")
+        
+        print(f"\n{'='*70}")
+        print(f"🎯 Button Click Received!")
+        print(f"   Request ID: {request_id}")
+        print(f"   Action: {action}")
+        print(f"   Space: {space}")
+        print(f"{'='*70}\n")
+        
+        if not request_id or not action:
+            return {"success": False, "error": "Missing parameters"}
+        
+        # Import database utilities
+        from agents.utils import db_util
+        
+        # Get leave request
+        leave_request = db_util.get_leave_request(request_id)
+        
+        if not leave_request:
+            return {"success": False, "error": "Request not found"}
+        
+        # Update status
+        new_status = "APPROVED" if action == "APPROVE" else "DECLINED"
+        decision_note = f"Leave request {new_status.lower()} by supervisor"
+        
+        success = db_util.update_leave_request_status(request_id, new_status, decision_note)
+        
+        if not success:
+            return {"success": False, "error": "Failed to update database"}
+        
+        # Send notifications
+        employee_space = leave_request.get("employee_space")
+        employee_email = leave_request.get("employee_email")
+        
+        if employee_space:
+            notification_msg = f"Your leave request ({request_id}) has been {new_status.lower()} by your supervisor."
+            send_message_to_space(employee_space, notification_msg)
+            print(f"✅ Notified employee: {employee_email}")
+        
+        confirmation_msg = f"Leave request {request_id} has been {new_status.lower()} and employee has been notified."
+        if space:
+            send_message_to_space(space, confirmation_msg)
+            print(f"✅ Sent confirmation to supervisor")
+        
+        print(f"\n{'='*70}")
+        print(f"✅ {new_status} complete!")
+        print(f"{'='*70}\n")
+        
+        return {"success": True, "status": new_status, "request_id": request_id}
+        
+    except Exception as error:
+        print(f"❌ Error processing approval button: {error}")
+        return {"success": False, "error": str(error)}
 
 # Webhook handler for incoming messages
 @app.api_route("/chat/webhook", methods=["GET", "POST"])
