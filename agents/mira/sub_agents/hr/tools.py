@@ -375,16 +375,16 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
     
     # All data is complete - proceed with workflow
         # Include employee_space (from space_name parameter) in the payload
-        rec = record_leave_request.invoke({"payload": {**payload, "employee_space": space_name, "status": "PENDING"}})
-        request_id = rec["request_id"]
+    rec = record_leave_request.invoke({"payload": {**payload, "employee_space": space_name, "status": "PENDING"}})
+    request_id = rec["request_id"]
 
-        conflicts = check_calendar_conflicts.invoke({
+    conflicts = check_calendar_conflicts.invoke({
             "user_email": payload["employee_email"],
             "start_date": payload["start_date"],
             "end_date": payload["end_date"],
         })
     
-        if conflicts.get("conflicts"):
+    if conflicts.get("conflicts"):
             conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
             return {
                 "status": "WAITING_USER_DECISION",
@@ -394,13 +394,13 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
                 "message": conflicts_message
             }
 
-        send_supervisor_approval.invoke({
+    send_supervisor_approval.invoke({
             "request_id": request_id,
             "supervisor_email": payload["supervisor_email"],
             "summary": "Leave approval request",
         })
     
-        return {
+    return {
             "status": "WAITING_SUPERVISOR", 
             "request_id": request_id,
             "message": "Leave request submitted successfully. Waiting for supervisor approval."
