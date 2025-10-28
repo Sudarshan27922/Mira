@@ -149,3 +149,41 @@ def format_user_context_for_prompt(user_context: Dict[str, Any]) -> str:
         return f"User context: {', '.join(context_parts)}"
     
     return ""
+
+
+def get_supervisor_info(supervisor_email: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve supervisor info from public.employee by email.
+
+    Returns a dict with keys: supervisor_name, supervisor_email, chat_id (if available),
+    or None if not found.
+    """
+    try:
+        if not supervisor_email:
+            return None
+
+        engine = _get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT emp_name, emp_email, chat_id
+                    FROM public.employee
+                    WHERE emp_email = :email
+                    LIMIT 1
+                    """
+                ),
+                {"email": supervisor_email},
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+
+            return {
+                "supervisor_name": row.emp_name,
+                "supervisor_email": row.emp_email,
+                "chat_id": getattr(row, "chat_id", None),
+            }
+    except Exception as e:
+        print(f"Error retrieving supervisor info: {e}")
+        return None
