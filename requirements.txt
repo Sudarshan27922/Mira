@@ -19,3 +19,5 @@ google-api-python-client
 httpx
 psycopg2-binary
 sqlalchemy
+requests
+python-dateutil

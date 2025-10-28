@@ -17,42 +17,57 @@ def _get_engine() -> Engine:
         _engine = create_engine(url, pool_pre_ping=True)
     return _engine
 
-def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict[str, Any]]:
+def get_user_context_from_db(email: Optional[str] = None, chat_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Retrieve user context from the employee database.
-    
+    Retrieve user context from the employee database by email or chat_id.
+
     Args:
-        email: Employee email address
-        chatspace: Optional chat space name for fallback lookup
-        
+        email: Employee email address (preferred lookup)
+        chat_id: Google Chat space ID (e.g., "spaces/AAAA...") as a fallback/secondary key
+
     Returns:
         Dict with user information or None if not found
     """
+    if not email and not chat_id:
+        raise ValueError("Either email or chat_id must be provided")
+
     try:
         engine = _get_engine()
-        
+
         with engine.connect() as conn:
-            # First try to find by email
-            result = conn.execute(
-                text("""
-                    SELECT emp_name, emp_email, designation, emp_type, business_unit, 
-                           is_resigning, resignation_date, manager_email, chat_id
-                    FROM public.employee 
-                    WHERE emp_email = :email 
-                    LIMIT 1
-                """),
-                {"email": email}
-            )
-            
-            row = result.fetchone()
-            
-            # If not found by email and chatspace provided, try to find by chatspace
-            if not row and chatspace:
-                # Note: This assumes there's a way to map chatspace to employee
-                # For now, we'll just return None if email lookup fails
-                # In the future, you might add a chatspace column to employee table
-                pass
-            
+            row = None
+
+            if email:
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT emp_name, emp_email, designation, emp_type, business_unit,
+                               is_resigning, resignation_date, manager_email, chat_id
+                        FROM public.employee
+                        WHERE emp_email = :email
+                        LIMIT 1
+                        """
+                    ),
+                    {"email": email},
+                )
+                row = result.fetchone()
+
+            # Fallback: lookup by chat_id if not found by email
+            if not row and chat_id:
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT emp_name, emp_email, designation, emp_type, business_unit,
+                               is_resigning, resignation_date, manager_email, chat_id
+                        FROM public.employee
+                        WHERE chat_id = :chat_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"chat_id": chat_id},
+                )
+                row = result.fetchone()
+
             if row:
                 return {
                     "emp_name": row.emp_name,
@@ -63,53 +78,45 @@ def get_user_context_from_db(email: str, chatspace: str = None) -> Optional[Dict
                     "is_resigning": row.is_resigning,
                     "resignation_date": str(row.resignation_date) if row.resignation_date else None,
                     "manager_email": row.manager_email,
-                    "chat_id": row.chat_id if hasattr(row, 'chat_id') else None
+                    "chat_id": getattr(row, "chat_id", None),
                 }
-            
+
             return None
-            
+
     except Exception as e:
         print(f"Error retrieving user context: {e}")
         return None
 
-def get_supervisor_info(supervisor_email: str) -> Optional[Dict[str, Any]]:
+
+def set_user_chat_id(email: str, chat_id: str) -> bool:
     """
-    Retrieve supervisor information including chat_id.
-    
+    Set the user's chat_id if it's currently null/empty.
+
     Args:
-        supervisor_email: Supervisor's email address (manager_email from employee table)
-        
+        email: Employee email (primary key for update)
+        chat_id: Google Chat space name/id to persist
+
     Returns:
-        Dict with supervisor information including chat_id, or None if not found
+        True if a row was updated, False otherwise.
     """
     try:
         engine = _get_engine()
-        
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             result = conn.execute(
-                text("""
-                    SELECT emp_email, chat_id, emp_name
-                    FROM public.employee 
-                    WHERE emp_email = :email 
-                    LIMIT 1
-                """),
-                {"email": supervisor_email}
+                text(
+                    """
+                    UPDATE public.employee
+                    SET chat_id = :chat_id
+                    WHERE emp_email = :email
+                      AND (chat_id IS NULL OR chat_id = '')
+                    """
+                ),
+                {"email": email, "chat_id": chat_id},
             )
-            
-            row = result.fetchone()
-            
-            if row:
-                return {
-                    "supervisor_email": row.emp_email,
-                    "chat_id": row.chat_id if hasattr(row, 'chat_id') else None,
-                    "supervisor_name": row.emp_name if hasattr(row, 'emp_name') else None
-                }
-            
-            return None
-            
+            return result.rowcount > 0
     except Exception as e:
-        print(f"Error retrieving supervisor info: {e}")
-        return None
+        print(f"Error setting user chat_id: {e}")
+        return False
 
 def format_user_context_for_prompt(user_context: Dict[str, Any]) -> str:
     """
