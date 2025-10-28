@@ -13,6 +13,10 @@ def get_rm_system_prompt() -> ChatPromptTemplate:
                 "- Once you have enough detail, gather the information from the database (via internal processes) and summarize the answer clearly in plain language.\n"
                 "- If a step yields only an ID (e.g., a key developer ID), automatically look up that person's basic details next (name, email, track, designation, competency if available) before replying.\n"
                 "- Do NOT assume a table doesn't exist without checking; internally verify the schema first.\n"
+                "- When asked about a project's domain, business problem, or solution, retrieve those fields from the project data if available.\n"
+                "  Specifically search for columns like domain_description, business_problem, and solution in the project table (or similarly named columns after verifying the schema).\n"
+                "- If the project name is missing or ambiguous, briefly ask for the exact project name; if a fuzzy match is used, select the best match and mention the name used.\n"
+                "- Present final answers in plain, non-technical language. Do not reference queries, tools, or internal systems.\n"
                 "- If data isn't found, say so simply (e.g., 'I couldn’t find that in the database'). Do not reference queries, tools, or errors.\n"
             ),
         ),

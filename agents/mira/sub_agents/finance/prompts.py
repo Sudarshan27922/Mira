@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -7,6 +8,9 @@ def get_finance_system_prompt() -> ChatPromptTemplate:
     Finance agent: routes and clarifies finance-related requests, then uses internal processes to
     fetch data via the SQL agent. Keeps language non-technical and user-friendly.
     """
+    # Read optional defaults from environment
+    default_pair = os.getenv("DEFAULT_CURRENCY_PAIR", "").strip()
+
     # Note: current date can be injected by the main agent; keep rules generic here
     return ChatPromptTemplate.from_messages([
         (
@@ -22,7 +26,8 @@ def get_finance_system_prompt() -> ChatPromptTemplate:
                 "Pegging rates (table: public.pegging_rates):\n"
                 "- Columns typically include: pegging_rate, pegging_month (numeric 1-12), pegging_year (numeric), currency_pair (e.g., 'USD/LKR'), notes.\n"
                 "- When asked for 'last month', compute last month relative to today's date, handling year rollover (January -> previous year, month=12).\n"
-                "- If currency pair is not provided, ask for it briefly (e.g., 'Which currency pair?').\n\n"
+                f"- If currency pair is not provided, {'assume ' + default_pair + ' by default and proceed' if default_pair else 'ask for it briefly (e.g., \'Which currency pair?\')'}.\n"
+                "- If the user asks for the 'lowest pegging rate' without specifying a time period, assume 'all time' and report the minimum rate available for the currency pair.\n\n"
                 "Revenue (table: public.revenue_tracking):\n"
                 "- Sum revenue for a given period by adding values from revenue_amount.\n"
                 "- For 'last year', compute last year based on today's date and filter appropriately (using a year column or a date column after inspecting schema).\n\n"
