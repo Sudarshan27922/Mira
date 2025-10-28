@@ -25,6 +25,8 @@ def check_calendar_conflicts(user_email: str, start_date: str, end_date: str) ->
         # Check calendar for events
         result = get_user_calendar_events(user_email, start_date, end_date, use_domain_delegation)
         
+        print(f"🗓️ Calendar check result: {result}")
+
         if result.get("status") == "error":
             print(f"⚠️ Calendar check failed: {result.get('error')}")
             # Return no conflicts on error to not block the workflow
@@ -62,22 +64,330 @@ def check_calendar_conflicts(user_email: str, start_date: str, end_date: str) ->
 
 
 @tool
-def send_supervisor_approval(request_id: str, supervisor_email: str, summary: str) -> Dict[str, Any]:
-    """Send a Google Chat card to supervisor asking approval for the given request_id. Returns status placeholder.
-
-    This is a stub; implement Google Chat card send and callback correlation later.
+def query_user_calendar(start_date: str, end_date: str, user_email: str = "") -> Dict[str, Any]:
+    """Query a user's Google Calendar for events within the given date range.
+    
+    This tool retrieves calendar events and returns formatted information about meetings/events.
+    Use this to:
+    - Check if user has meetings during a time period
+    - View user's schedule for coordination
+    - Identify potential conflicts before scheduling
+    
+    CRITICAL: start_date and end_date MUST be in YYYY-MM-DD format (e.g., '2025-10-27').
+    DO NOT pass relative dates like 'tomorrow' or 'Monday' - always convert to YYYY-MM-DD first.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format (e.g., '2025-10-27'), NOT relative
+        end_date: End date in YYYY-MM-DD format (e.g., '2025-10-27'), NOT relative
+        user_email: User's email (required - use user_context['emp_email'])
+        
+    Returns:
+        Dict with formatted calendar information:
+        - events: List of calendar events with details
+        - total_events: Count of events found
+        - message: Human-readable summary
+        - date_range: The queried date range
     """
-    return {"status": "SENT", "request_id": request_id, "supervisor_email": supervisor_email}
+    try:
+        from agents.utils.calendar_utils import get_user_calendar_events
+        import re
+        from datetime import datetime
+        
+        print(f"🔍 query_user_calendar called with start_date='{start_date}', end_date='{end_date}', user_email='{user_email}'")
+        
+        # Validate date format - must be YYYY-MM-DD
+        date_pattern = r'^\d{4}-\d{2}-\d{2}$'
+        if not re.match(date_pattern, start_date) or not re.match(date_pattern, end_date):
+            error_msg = f"Dates must be in YYYY-MM-DD format. Received: start_date='{start_date}', end_date='{end_date}'"
+            print(f"❌ {error_msg}")
+            return {
+                "status": "error",
+                "error": "Invalid date format",
+                "message": error_msg
+            }
+        
+        # Check if date is in the past (likely a mistake)
+        try:
+            date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+            today = datetime.now()
+            if date_obj < today and (today - date_obj).days > 30:
+                print(f"⚠️ Warning: Querying date from the past: {start_date}")
+        except:
+            pass
+        
+        # If no user_email provided, this will fail - HR agent should always provide it
+        if not user_email:
+            return {
+                "status": "error",
+                "error": "user_email is required",
+                "message": "Please provide the user's email address to query their calendar."
+            }
+        
+        # Get configuration from environment
+        use_domain_delegation = os.getenv("USE_DOMAIN_DELEGATION", "true").lower() == "true"
+        
+        # Query calendar
+        result = get_user_calendar_events(user_email, start_date, end_date, use_domain_delegation)
+        
+        if result.get("status") == "error":
+            return {
+                "status": "error",
+                "error": result.get("error"),
+                "message": f"Unable to retrieve calendar for {user_email}. They may need to share their calendar."
+            }
+        
+        events = result.get("conflicts", [])  # "conflicts" is a misnomer, these are just events
+        
+        if not events:
+            return {
+                "status": "success",
+                "events": [],
+                "total_events": 0,
+                "message": f"No events found for {user_email} from {start_date} to {end_date}.",
+                "date_range": {"start": start_date, "end": end_date}
+            }
+        
+        # Format events into readable message
+        message = f"📅 Found {len(events)} event(s) for {user_email} from {start_date} to {end_date}:\n\n"
+        
+        for i, event in enumerate(events, 1):
+            from datetime import datetime
+            start_dt = datetime.fromisoformat(event['start'].replace('Z', '+00:00'))
+            summary = event.get('summary', 'Untitled Event')
+            location = event.get('location', '')
+            
+            message += f"{i}. {summary}\n"
+            message += f"   📅 {start_dt.strftime('%B %d, %Y at %I:%M %p')}\n"
+            if location:
+                message += f"   📍 {location}\n"
+            if event.get('attendees', 0) > 0:
+                message += f"   👥 {event['attendees']} attendee(s)\n"
+            message += "\n"
+        
+        return {
+            "status": "success",
+            "events": events,
+            "total_events": len(events),
+            "message": message,
+            "date_range": {"start": start_date, "end": end_date}
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in query_user_calendar: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to query calendar. Please try again."
+        }
+
+
+@tool
+def send_supervisor_approval(request_id: str, supervisor_email: str, summary: str) -> Dict[str, Any]:
+    """Send a Google Chat card to supervisor asking approval for the leave request.
+    
+    Args:
+        request_id: Unique leave request identifier
+        supervisor_email: Supervisor's email address
+        summary: Summary of the request (legacy parameter)
+    
+    Returns:
+        Dict with status, request_id, and supervisor_email
+    """
+    try:
+        print(f"\n{'='*70}")
+        print(f"📤 STEP 1: Starting supervisor approval workflow")
+        print(f"   Request ID: {request_id}")
+        print(f"   Supervisor Email: {supervisor_email}")
+        print(f"{'='*70}\n")
+        
+        # Import utilities
+        from agents.utils import db_util, user_context
+        
+        # Get leave request details from database
+        print(f"📋 STEP 2: Retrieving leave request from database...")
+        leave_request = db_util.get_leave_request(request_id)
+        
+        if not leave_request:
+            print(f"❌ Leave request {request_id} not found in database")
+            return {"status": "ERROR", "request_id": request_id, "error": "Request not found"}
+        
+        print(f"✅ Retrieved leave request:")
+        print(f"   Employee: {leave_request.get('employee_email')}")
+        print(f"   Leave Type: {leave_request.get('leave_type')}")
+        print(f"   Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
+        print(f"   Current Status: {leave_request.get('status')}")
+        
+        # Get supervisor info including chat_id
+        print(f"\n🔍 STEP 3: Looking up supervisor information...")
+        print(f"   Searching for: {supervisor_email}")
+        supervisor_info = user_context.get_supervisor_info(supervisor_email)
+        
+        if not supervisor_info:
+            print(f"❌ Supervisor {supervisor_email} not found in database")
+            return {"status": "ERROR", "request_id": request_id, "error": "Supervisor not found"}
+        
+        supervisor_space = supervisor_info.get("chat_id")
+        supervisor_name = supervisor_info.get("supervisor_name", supervisor_email)
+        
+        print(f"✅ Found supervisor:")
+        print(f"   Name: {supervisor_name}")
+        print(f"   Email: {supervisor_info.get('supervisor_email')}")
+        
+        if not supervisor_space:
+            print(f"❌ Supervisor {supervisor_email} has no chat_id configured")
+            return {"status": "ERROR", "request_id": request_id, "error": "Supervisor chat_id not configured"}
+        
+        print(f"   Chat ID: {supervisor_space}")
+        
+        # Get employee name from database
+        print(f"\n👤 STEP 4: Retrieving employee information...")
+        employee_info = user_context.get_user_context_from_db(leave_request.get("employee_email"))
+        employee_name = employee_info.get("emp_name", leave_request.get("employee_email")) if employee_info else leave_request.get("employee_email")
+        
+        print(f"✅ Employee: {employee_name} ({leave_request.get('employee_email')})")
+        
+        # Send approval card directly via function import
+        print(f"\n📨 STEP 5: Preparing to send approval card...")
+        import sys
+        import os
+        
+        # Import the server function directly instead of making HTTP call
+        # Add server directory to path
+        server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "server")
+        if server_path not in sys.path:
+            sys.path.insert(0, server_path)
+        
+        result = None
+        
+        try:
+            # Initialize Google services first
+            print(f"   Initializing Google Chat service...")
+            from google.auth.transport.requests import Request as GoogleRequest
+            from google.oauth2 import service_account
+            from googleapiclient.discovery import build
+            
+            service_account_file = os.getenv("SERVICE_ACCOUNT_KEY_FILE", "./service-account-key.json")
+            
+            credentials = service_account.Credentials.from_service_account_file(
+                service_account_file,
+                scopes=[
+                    "https://www.googleapis.com/auth/chat.bot",
+                    "https://www.googleapis.com/auth/chat.messages",
+                    "https://www.googleapis.com/auth/chat.spaces",
+                ]
+            )
+            
+            from main import send_supervisor_approval_card, chat_service
+            
+            # Inject the initialized chat_service
+            import sys
+            server_module = sys.modules.get('main')
+            if server_module:
+                server_module.chat_service = build('chat', 'v1', credentials=credentials)
+            
+            print(f"   Google Chat service initialized")
+            print(f"   Target Space: {supervisor_space}")
+            print(f"   Card Details:")
+            print(f"      - Employee: {employee_name} ({leave_request.get('employee_email')})")
+            print(f"      - Leave Type: {leave_request.get('leave_type')}")
+            print(f"      - Dates: {leave_request.get('start_date')} to {leave_request.get('end_date')}")
+            print(f"      - Reason: {leave_request.get('reason')}")
+            
+            print(f"\n🚀 STEP 6: Sending approval card to supervisor...")
+            print(f"   Calling send_supervisor_approval_card() directly...")
+            
+            result = send_supervisor_approval_card(
+                supervisor_space=supervisor_space,
+                request_id=request_id,
+                employee_name=employee_name,
+                employee_email=leave_request.get("employee_email"),
+                leave_type=leave_request.get("leave_type"),
+                start_date=leave_request.get("start_date"),
+                end_date=leave_request.get("end_date"),
+                reason=leave_request.get("reason")
+            )
+            
+            print(f"   Function returned successfully")
+            
+        except ImportError as imp_error:
+            print(f"❌ Could not import server functions: {imp_error}")
+            return {"status": "ERROR", "request_id": request_id, "error": f"Import error: {str(imp_error)}"}
+        except Exception as func_error:
+            print(f"❌ Error calling approval card function: {func_error}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "ERROR", "request_id": request_id, "error": f"Function call failed: {str(func_error)}"}
+        
+        if result and result.get("success"):
+            print(f"✅ SUCCESS: Approval card sent to supervisor!")
+            print(f"   Message ID: {result.get('messageId')}")
+            print(f"   Space: {result.get('space')}")
+            print(f"   Request ID: {request_id}")
+            print(f"\n{'='*70}")
+            print(f"✅ Leave approval workflow completed successfully")
+            print(f"{'='*70}\n")
+            return {"status": "SENT", "request_id": request_id, "supervisor_email": supervisor_email}
+        else:
+            print(f"❌ FAILED: Could not send approval card")
+            print(f"   Result: {result}")
+            print(f"\n{'='*70}")
+            print(f"❌ Leave approval workflow failed")
+            print(f"{'='*70}\n")
+            return {"status": "ERROR", "request_id": request_id, "error": "Failed to send card"}
+            
+    except Exception as e:
+        print(f"\n❌ EXCEPTION: Error in supervisor approval workflow")
+        print(f"   Error: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"\n{'='*70}")
+        print(f"❌ Leave approval workflow failed with exception")
+        print(f"{'='*70}\n")
+        return {"status": "ERROR", "request_id": request_id, "error": str(e)}
 
 
 @tool
 def record_leave_request(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Record or update a leave request in persistence. Returns {'request_id': '...'}.
+    """Record or update a leave request in the database. Returns {'request_id': '...', 'status': '...'}.
 
-    This is a stub; wire to DB later. Generates a deterministic-ish placeholder id when missing.
+    Args:
+        payload: Dict containing leave request details including:
+            - request_id: Optional unique identifier
+            - employee_email: Employee email
+            - supervisor_email: Supervisor email
+            - leave_type: Type of leave
+            - start_date: Start date (YYYY-MM-DD)
+            - end_date: End date (YYYY-MM-DD)
+            - reason: Reason for leave
+            - employee_space: Employee's Google Chat space ID
+            - status: Request status (default: PENDING)
     """
-    request_id = payload.get("request_id") or f"req_{abs(hash(str(payload))) % (10**8)}"
-    return {"request_id": request_id, "status": payload.get("status", "CREATED")}
+    try:
+        from agents.utils import db_util
+        
+        # Generate request_id if not provided
+        request_id = payload.get("request_id") or f"req_{abs(hash(str(payload))) % (10**8)}"
+        
+        # Create or update leave request in database
+        result = db_util.create_leave_request({
+            "request_id": request_id,
+            "employee_email": payload.get("employee_email"),
+            "supervisor_email": payload.get("supervisor_email"),
+            "leave_type": payload.get("leave_type"),
+            "start_date": payload.get("start_date"),
+            "end_date": payload.get("end_date"),
+            "reason": payload.get("reason"),
+            "employee_space": payload.get("employee_space"),
+            "status": payload.get("status", "PENDING")
+        })
+        
+        return {"request_id": request_id, "status": result.get("status", "CREATED")}
+        
+    except Exception as e:
+        print(f"❌ Error recording leave request: {e}")
+        # Fallback to generating request_id on error
+        request_id = payload.get("request_id") or f"req_{abs(hash(str(payload))) % (10**8)}"
+        return {"request_id": request_id, "status": "ERROR", "error": str(e)}
 
 
 @tool
@@ -99,36 +409,37 @@ def leave_process_workflow(payload: Dict[str, Any], space_name: str = "") -> Dic
         }
     
     # All data is complete - proceed with workflow
-    rec = record_leave_request.invoke({"payload": {**payload, "status": "COLLECTED"}})
+        # Include employee_space (from space_name parameter) in the payload
+    rec = record_leave_request.invoke({"payload": {**payload, "employee_space": space_name, "status": "PENDING"}})
     request_id = rec["request_id"]
 
     conflicts = check_calendar_conflicts.invoke({
-        "user_email": payload["employee_email"],
-        "start_date": payload["start_date"],
-        "end_date": payload["end_date"],
-    })
+            "user_email": payload["employee_email"],
+            "start_date": payload["start_date"],
+            "end_date": payload["end_date"],
+        })
     
     if conflicts.get("conflicts"):
-        conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
-        return {
-            "status": "WAITING_USER_DECISION",
-            "request_id": request_id,
-            "conflicts": conflicts["conflicts"],
-            "total_conflicts": conflicts.get("total", len(conflicts.get("conflicts", []))),
-            "message": conflicts_message
-        }
+            conflicts_message = conflicts.get("message", "Conflicts found. Proceed anyway or choose new dates?")
+            return {
+                "status": "WAITING_USER_DECISION",
+                "request_id": request_id,
+                "conflicts": conflicts["conflicts"],
+                "total_conflicts": conflicts.get("total", len(conflicts.get("conflicts", []))),
+                "message": conflicts_message
+            }
 
     send_supervisor_approval.invoke({
-        "request_id": request_id,
-        "supervisor_email": payload["supervisor_email"],
-        "summary": "Leave approval request",
-    })
+            "request_id": request_id,
+            "supervisor_email": payload["supervisor_email"],
+            "summary": "Leave approval request",
+        })
     
     return {
-        "status": "WAITING_SUPERVISOR", 
-        "request_id": request_id,
-        "message": "Leave request submitted successfully. Waiting for supervisor approval."
-    }
+            "status": "WAITING_SUPERVISOR", 
+            "request_id": request_id,
+            "message": "Leave request submitted successfully. Waiting for supervisor approval."
+        }
 
 
 @tool
@@ -152,6 +463,7 @@ HR_TOOLS = [
     record_leave_request,
     leave_process_workflow,
     leave_process_resume,
+    query_user_calendar,
 ]
 
 
