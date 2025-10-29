@@ -51,6 +51,7 @@ calendar_service = None
 class SendMessageRequest(BaseModel):
     spaceName: str
     message: str
+    threadName: Optional[str] = None
 
 class BroadcastMessageRequest(BaseModel):
     message: str
@@ -104,15 +105,18 @@ def initialize_google_services():
 
 # Core Google Chat Functions
 
-def send_message_to_space(space_name: str, message_text: str) -> Dict[str, Any]:
+def send_message_to_space(space_name: str, message_text: str, thread_name: Optional[str] = None) -> Dict[str, Any]:
     """Send a simple text message to a specific Google Chat space"""
     if not chat_service:
         raise HTTPException(status_code=500, detail="Google Chat service not initialized")
     
     try:
+        body: Dict[str, Any] = {'text': message_text}
+        if thread_name:
+            body['thread'] = {'name': thread_name}
         response = chat_service.spaces().messages().create(
             parent=space_name,
-            body={'text': message_text}
+            body=body
         ).execute()
         
         return {
@@ -467,7 +471,7 @@ async def list_spaces():
 @app.post("/chat/send")
 async def send_message(request: SendMessageRequest):
     try:
-        result = send_message_to_space(request.spaceName, request.message)
+        result = send_message_to_space(request.spaceName, request.message, request.threadName)
         return {"success": True, **result}
     except HTTPException:
         raise
@@ -683,8 +687,8 @@ async def webhook_handler(request: Request):
         event = await request.json()
         print("🔔 Incoming webhook event:", json.dumps(event, indent=2))
         
-        # Always respond immediately
-        response = JSONResponse(content={}, status_code=200)
+        # Always respond immediately with a short placeholder to avoid timeout banner
+        response = JSONResponse(content={"text": "Got it — working on it..."}, status_code=200)
         
         # Check if this is a card click action (button interaction)
         action_response = event.get("action", {})
@@ -714,6 +718,10 @@ async def webhook_handler(request: Request):
             event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("text") or
             event.get("message", {}).get("text")
         )
+        thread_name = (
+            (event.get("message", {}) or {}).get("thread", {}).get("name") or
+            (event.get("chat", {}).get("messagePayload", {}).get("message", {}) or {}).get("thread", {}).get("name")
+        )
         sender_info = (
             event.get("chat", {}).get("messagePayload", {}).get("message", {}).get("sender", {}) or
             event.get("message", {}).get("sender", {})
@@ -733,7 +741,7 @@ async def webhook_handler(request: Request):
 
         # Process in background
         import asyncio
-        asyncio.create_task(process_webhook_message(space_name, message_text, sender_email, sender_display_name))
+        asyncio.create_task(process_webhook_message(space_name, message_text, sender_email, sender_display_name, thread_name))
         
         return response
         
@@ -854,7 +862,7 @@ async def process_card_button_action(event: Dict[str, Any]):
     except Exception as error:
         print(f"❌ Failed to process card button action: {error}")
 
-async def process_webhook_message(space_name: str, message_text: str, sender_email: str, sender_display_name: str = ""):
+async def process_webhook_message(space_name: str, message_text: str, sender_email: str, sender_display_name: str = "", thread_name: Optional[str] = None):
     """Process webhook message with Mira agent"""
     try:
         print(f"💡 Processing message with Mira: \"{message_text}\"")
@@ -877,7 +885,8 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
             async with httpx.AsyncClient() as client:
                 await client.post(f"http://localhost:{PORT}/chat/send", json={
                     "spaceName": space_name,
-                    "message": agent_response
+                    "message": agent_response,
+                    "threadName": thread_name
                 })
             
             print(f"✅ Replied to {space_name} with Mira's response.")
@@ -888,7 +897,8 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
             async with httpx.AsyncClient() as client:
                 await client.post(f"http://localhost:{PORT}/chat/send", json={
                     "spaceName": space_name,
-                    "message": "I'm sorry, I couldn't process your request. Please try again."
+                    "message": "I'm sorry, I couldn't process your request. Please try again.",
+                    "threadName": thread_name
                 })
     
     except Exception as error:
@@ -899,7 +909,8 @@ async def process_webhook_message(space_name: str, message_text: str, sender_ema
             async with httpx.AsyncClient() as client:
                 await client.post(f"http://localhost:{PORT}/chat/send", json={
                     "spaceName": space_name,
-                    "message": "I'm sorry, I'm having trouble processing your request right now. Please try again later."
+                    "message": "I'm sorry, I'm having trouble processing your request right now. Please try again later.",
+                    "threadName": thread_name
                 })
         except Exception as send_error:
             print(f"❌ Failed to send error message: {send_error}")
