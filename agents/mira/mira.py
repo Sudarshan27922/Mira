@@ -45,7 +45,7 @@ prompt = ChatPromptTemplate.from_messages([
     "If the request is IT-related, route to the IT_Agent.\n\n"
     "For any question that requires information from the company database, use the SQL agent tool to generate and execute SQL queries. If user context is provided (Name, Email, Designation, etc.), use this information instead of asking for it. "
     "When answering questions about a user, address them by their name (from the database) instead of their email address.\n\n"
-    "IMPORTANT: When delegating to the HR_Agent, always pass the user_context as a parameter if it's available. This ensures the HR agent has access to user information like email and manager details."),
+    "IMPORTANT: When delegating to the HR_Agent or IT_Agent, always pass the user_context as a parameter if it's available. This ensures these agents have access to user information like email for proper ticket creation and workflow handling."),
     MessagesPlaceholder(variable_name="chat_history"),
     ("user", "{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad"),
