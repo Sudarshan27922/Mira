@@ -7,6 +7,7 @@ This script sets up the Pinecone vector store with Hugging Face embeddings.
 import os
 import sys
 import time
+import argparse
 from pathlib import Path
 
 # Add the project root to Python path
@@ -33,13 +34,21 @@ def main():
         return False
     
     try:
+        parser = argparse.ArgumentParser(description="Setup Pinecone vector store for Mira RAG")
+        parser.add_argument("--it-docs", action="store_true", help="Ingest IT guides from repo 'docs/' into namespace 'it'")
+        parser.add_argument("--docs-dir", type=str, default=None, help="Custom documents directory to ingest")
+        parser.add_argument("--namespace", type=str, default=None, help="Namespace to bind during ingestion/search")
+        parser.add_argument("--category", type=str, default=None, help="Category metadata to tag during ingestion")
+        parser.add_argument("--no-interactive", action="store_true", help="Disable interactive prompts (non-destructive)")
+        args = parser.parse_args()
+
         # Initialize vector store manager
         print("📋 Initializing vector store manager...")
         manager = VectorStoreManager()
         
-        # Check if index already exists and ask user what to do
+        # Check if index already exists and ask user what to do (unless non-interactive)
         existing_indexes = [index.name for index in manager.pc.list_indexes()]
-        if manager.index_name in existing_indexes:
+        if manager.index_name in existing_indexes and not args.no_interactive:
             print(f"⚠️  Index '{manager.index_name}' already exists")
             response = input("Do you want to delete and recreate it? (y/N): ").strip().lower()
             
@@ -51,9 +60,24 @@ def main():
             else:
                 print("ℹ️  Using existing index")
         
+        # Determine ingestion parameters
+        docs_dir = args.docs_dir
+        namespace = args.namespace
+        category = args.category
+
+        if args.it_docs:
+            # IT ingestion defaults
+            docs_dir = docs_dir or "docs"
+            namespace = namespace or "it"
+            category = category or "it"
+
         # Setup complete vector store
         print("\n🔧 Setting up vector store...")
-        success = manager.setup_complete_vector_store()
+        success = manager.setup_complete_vector_store(
+            docs_directory=docs_dir or "agents/docs",
+            category=category,
+            namespace=namespace,
+        )
         
         if success:
             print("✅ Vector store setup completed successfully!")
@@ -67,8 +91,8 @@ def main():
             
             # Test search functionality
             print("\n🔍 Testing search functionality...")
-            test_query = "leave policy"
-            results = manager.search_documents(test_query, k=3)
+            test_query = "leave policy" if namespace is None else "password reset"
+            results = manager.search_documents(test_query, k=3, namespace=namespace, category=category)
             
             if results:
                 print(f"   ✅ Found {len(results)} results for '{test_query}'")

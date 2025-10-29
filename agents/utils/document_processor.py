@@ -1,6 +1,6 @@
 import os
 import PyPDF2
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 import logging
 
@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 class DocumentProcessor:
     """Utility class for processing PDF documents and extracting text."""
     
-    def __init__(self, docs_directory: str = "agents/docs"):
+    def __init__(self, docs_directory: str = "agents/docs", *, category: Optional[str] = None):
         self.docs_directory = Path(docs_directory)
+        self.category = category
         if not self.docs_directory.exists():
             raise FileNotFoundError(f"Documents directory not found: {docs_directory}")
     
@@ -52,8 +53,10 @@ class DocumentProcessor:
                     "source": str(pdf_file),
                     "filename": pdf_file.name,
                     "file_type": "pdf",
-                    "file_size": pdf_file.stat().st_size
+                    "file_size": pdf_file.stat().st_size,
                 }
+                if self.category:
+                    doc_metadata["category"] = self.category
                 
                 # Split text into chunks (you can adjust chunk size as needed)
                 chunks = self._split_text_into_chunks(text, chunk_size=1000, overlap=200)

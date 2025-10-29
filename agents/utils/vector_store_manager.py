@@ -9,7 +9,7 @@ from langchain_core.documents import Document
 from .document_processor import DocumentProcessor
 from ..config.pinecone_config import pinecone_config
 
-# he
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class VectorStoreManager:
         )
         
         self.vector_store = None
+        self.current_namespace: Optional[str] = None
         self.index_name = self.pinecone_config.index_name
         self.model_name = model_name
         
@@ -80,25 +81,29 @@ class VectorStoreManager:
             logger.error(f"Error creating index: {str(e)}")
             return False
     
-    def initialize_vector_store(self) -> bool:
-        """Initialize the vector store connection."""
+    def initialize_vector_store(self, namespace: Optional[str] = None) -> bool:
+        """Initialize the vector store connection. If a namespace is provided,
+        binds the underlying store to that namespace."""
         try:
             self.vector_store = PineconeVectorStore(
                 index_name=self.index_name,
                 embedding=self.embeddings,
-                pinecone_api_key=self.pinecone_config.api_key
+                pinecone_api_key=self.pinecone_config.api_key,
+                namespace=namespace if namespace else None,
             )
+            self.current_namespace = namespace
             logger.info("Vector store initialized successfully")
             return True
         except Exception as e:
             logger.error(f"Error initializing vector store: {str(e)}")
             return False
     
-    def populate_vector_store(self, docs_directory: str = "agents/docs") -> bool:
-        """Populate the vector store with documents from the specified directory."""
+    def populate_vector_store(self, docs_directory: str = "agents/docs", *, category: Optional[str] = None, namespace: Optional[str] = None) -> bool:
+        """Populate the vector store with documents from the specified directory.
+        Adds optional category metadata and supports writing into a namespace."""
         try:
             # Process documents
-            processor = DocumentProcessor(docs_directory)
+            processor = DocumentProcessor(docs_directory, category=category)
             documents = processor.process_all_documents()
             
             if not documents:
@@ -114,6 +119,11 @@ class VectorStoreManager:
                 )
                 langchain_docs.append(langchain_doc)
             
+            # Ensure vector store is initialized for the target namespace
+            if namespace is not None and self.current_namespace != namespace:
+                if not self.initialize_vector_store(namespace=namespace):
+                    return False
+
             # Add documents to vector store
             logger.info(f"Adding {len(langchain_docs)} documents to vector store...")
             self.vector_store.add_documents(langchain_docs)
@@ -125,14 +135,26 @@ class VectorStoreManager:
             logger.error(f"Error populating vector store: {str(e)}")
             return False
     
-    def search_documents(self, query: str, k: int = 5) -> List[Document]:
-        """Search for similar documents in the vector store."""
+    def search_documents(self, query: str, k: int = 5, *, namespace: Optional[str] = None, category: Optional[str] = None) -> List[Document]:
+        """Search for similar documents in the vector store. If a namespace is
+        provided, ensure the store is bound to it. Optionally apply a metadata
+        filter by category when namespace isn't used."""
         try:
             if not self.vector_store:
                 logger.error("Vector store not initialized")
                 return []
             
-            results = self.vector_store.similarity_search(query, k=k)
+            # Switch namespace if requested
+            if namespace is not None and self.current_namespace != namespace:
+                if not self.initialize_vector_store(namespace=namespace):
+                    return []
+
+            search_kwargs: Dict[str, Any] = {}
+            if category and namespace is None:
+                # Fallback filtering when namespaces are not used
+                search_kwargs["filter"] = {"category": category}
+
+            results = self.vector_store.similarity_search(query, k=k, **search_kwargs)
             logger.info(f"Found {len(results)} similar documents")
             return results
             
@@ -140,14 +162,22 @@ class VectorStoreManager:
             logger.error(f"Error searching documents: {str(e)}")
             return []
     
-    def search_with_score(self, query: str, k: int = 5) -> List[tuple]:
-        """Search for similar documents with similarity scores."""
+    def search_with_score(self, query: str, k: int = 5, *, namespace: Optional[str] = None, category: Optional[str] = None) -> List[tuple]:
+        """Search for similar documents with similarity scores. Supports optional namespace and category filter."""
         try:
             if not self.vector_store:
                 logger.error("Vector store not initialized")
                 return []
             
-            results = self.vector_store.similarity_search_with_score(query, k=k)
+            if namespace is not None and self.current_namespace != namespace:
+                if not self.initialize_vector_store(namespace=namespace):
+                    return []
+
+            search_kwargs: Dict[str, Any] = {}
+            if category and namespace is None:
+                search_kwargs["filter"] = {"category": category}
+
+            results = self.vector_store.similarity_search_with_score(query, k=k, **search_kwargs)
             logger.info(f"Found {len(results)} similar documents with scores")
             return results
             
@@ -180,19 +210,19 @@ class VectorStoreManager:
             logger.error(f"Error deleting index: {str(e)}")
             return False
     
-    def setup_complete_vector_store(self, docs_directory: str = "agents/docs") -> bool:
-        """Complete setup: create index, initialize store, and populate with documents."""
+    def setup_complete_vector_store(self, docs_directory: str = "agents/docs", *, category: Optional[str] = None, namespace: Optional[str] = None) -> bool:
+        """Complete setup: create index, initialize store (optionally for a namespace), and populate with documents with optional category."""
         try:
             # Step 1: Create index
             if not self.create_index():
                 return False
             
             # Step 2: Initialize vector store
-            if not self.initialize_vector_store():
+            if not self.initialize_vector_store(namespace=namespace):
                 return False
             
             # Step 3: Populate with documents
-            if not self.populate_vector_store(docs_directory):
+            if not self.populate_vector_store(docs_directory, category=category, namespace=namespace):
                 return False
             
             logger.info("Complete vector store setup successful")
