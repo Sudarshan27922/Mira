@@ -43,6 +43,21 @@ def _make_hr_agent_tool(name: str, description: str, executor_factory):
         description=description,
     )
 
+# Special wrapper for IT agent that can accept user context
+def _make_it_agent_tool(name: str, description: str, executor_factory):
+    def _run(task: str, user_context: str = "") -> str:
+        executor = executor_factory()
+        # Include user context in the input if provided
+        full_input = f"{user_context}\n\n{task}" if user_context else task
+        result = executor.invoke({"input": full_input})
+        return result.get("output", "")
+
+    return StructuredTool.from_function(
+        func=_run,
+        name=name,
+        description=description,
+    )
+
 
 HR_Agent = _make_hr_agent_tool(
     name="HR_Agent",
@@ -50,9 +65,9 @@ HR_Agent = _make_hr_agent_tool(
     executor_factory=get_hr_agent_executor,
 )
 
-IT_Agent = _make_agent_tool(
+IT_Agent = _make_it_agent_tool(
     name="IT_Agent",
-    description="Handle IT support tasks and troubleshooting. Input is the user's request.",
+    description="Handle IT support tasks and troubleshooting. Input is the user's request. Can accept user_context parameter.",
     executor_factory=get_it_agent_executor,
 )
 
