@@ -675,40 +675,22 @@ async def process_approval_button(request: Request):
             </body></html>
         """)
 
-# Webhook handler for incoming messages
-@app.api_route("/chat/webhook", methods=["GET", "POST"])
-async def webhook_handler(request: Request):
+async def process_incoming_event(body_bytes: bytes):
+    """Parse the incoming event and route to appropriate handlers with minimal latency in the webhook."""
     try:
-        # Handle GET requests (for testing)
-        if request.method == "GET":
-            return {"success": True, "message": "Webhook endpoint is active"}
-        
-        # Handle POST requests (incoming messages)
-        event = await request.json()
-        print("🔔 Incoming webhook event:", json.dumps(event, indent=2))
-        
-        # Always respond immediately with a short placeholder to avoid timeout banner
-        response = JSONResponse(content={"text": "Got it — working on it..."}, status_code=200)
-        
-        # Check if this is a card click action (button interaction)
+        event = json.loads(body_bytes.decode('utf-8') or '{}')
+
+        # Quick classification log without heavy pretty-printing
+        evt_type = event.get('type') or event.get('action', {}).get('actionMethodName') or 'unknown'
+        print(f"🔎 Processing event type={evt_type}")
+
+        # Card button interactions
         action_response = event.get("action", {})
-        print(f"🔍 Checking for button action: action_response keys = {action_response.keys() if action_response else 'None'}")
-        
         if action_response and action_response.get("actionMethodName"):
-            print("🎯 Card button action detected!")
-            print(f"   Action method: {action_response.get('actionMethodName')}")
-            print(f"   Parameters: {action_response.get('parameters', [])}")
-            # Process card button action in background
-            import asyncio
-            asyncio.create_task(process_card_button_action(event))
-            return response
-        else:
-            print(f"ℹ️  Not a button action - checking other event types...")
-            print(f"   Event keys: {list(event.keys())}")
-            print(f"   Event type: {event.get('type', 'unknown')}")
-        
-        # Extract event data for regular messages
-        # Google Chat webhook format can vary, try multiple paths
+            await process_card_button_action(event)
+            return
+
+        # Regular message events
         space_name = (
             event.get("chat", {}).get("messagePayload", {}).get("space", {}).get("name") or
             event.get("space", {}).get("name") or
@@ -729,26 +711,45 @@ async def webhook_handler(request: Request):
         sender_email = sender_info.get("email")
         sender_type = sender_info.get("type")
         sender_display_name = sender_info.get("displayName", "")
-        
-        if not space_name or not message_text:
-            print("⚠️ No space name or message text found in event")
-            return response
-        
-        # Skip processing if the message is from the bot itself
-        if sender_type == "BOT":
-            print("🤖 Skipping bot message")
-            return response
 
-        # Process in background
-        import asyncio
-        asyncio.create_task(process_webhook_message(space_name, message_text, sender_email, sender_display_name, thread_name))
+        if not space_name or not message_text:
+            print("⚠️ Missing space or message text; dropping event")
+            return
+
+        if sender_type == "BOT":
+            print("🤖 Skipping bot-originated message")
+            return
+
+        await process_webhook_message(space_name, message_text, sender_email, sender_display_name, thread_name)
+
+    except Exception as error:
+        print(f"❌ Error in process_incoming_event: {error}")
+
+# Webhook handler for incoming messages
+@app.api_route("/chat/webhook", methods=["GET", "POST"])
+async def webhook_handler(request: Request):
+    try:
+        # Handle GET requests (for testing)
+        if request.method == "GET":
+            return {"success": True, "message": "Webhook endpoint is active"}
         
+        # Handle POST requests (incoming messages) - read body and offload processing
+        # Always respond immediately with a short placeholder to avoid timeout banner
+        response = JSONResponse(content={"text": "Got it — working on it..."}, status_code=200)
+
+        body_bytes = await request.body()
+        print("🔔 Webhook event received")
+
+        import asyncio
+        asyncio.create_task(process_incoming_event(body_bytes))
+
         return response
         
     except Exception as error:
         print(f"❌ Failed to process webhook: {error}")
         return JSONResponse(content={}, status_code=200)
 
+ 
 async def process_card_button_action(event: Dict[str, Any]):
     """Process card button click actions (approve/decline leave requests)"""
     try:
