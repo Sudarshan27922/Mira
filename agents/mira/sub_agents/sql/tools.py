@@ -76,9 +76,12 @@ def list_public_tables() -> dict:
 @tool("describe_table_columns")
 def describe_table_columns(table_name: str) -> str:
     """
-    Describe columns for a given table in public schema. Input: table name.
+    Describe columns for a given table in public schema. Input: table name (with or without 'public.' prefix).
     """
     try:
+        # Strip 'public.' prefix if present
+        clean_table_name = table_name.replace('public.', '') if table_name.startswith('public.') else table_name
+        
         eng = _get_engine()
         with eng.connect() as conn:
             result = conn.execute(
@@ -90,7 +93,7 @@ def describe_table_columns(table_name: str) -> str:
                     ORDER BY ordinal_position
                     """
                 ),
-                {"t": table_name},
+                {"t": clean_table_name},
             )
             rows = result.fetchall()
             data: List[Dict[str, Any]] = [dict(r._mapping) for r in rows]

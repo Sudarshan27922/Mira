@@ -7,6 +7,7 @@ from .sub_agents.hr.agent import get_hr_agent_executor
 from .sub_agents.it.agent import get_it_agent_executor
 from .sub_agents.rm.agent import get_rm_agent_executor
 from .sub_agents.sql.agent import get_sql_agent_executor
+from .sub_agents.finance.agent import get_finance_agent_executor
 from .rag_tool import RAG_TOOLS
 
 
@@ -67,5 +68,11 @@ SQL_Agent = _make_agent_tool(
     executor_factory=get_sql_agent_executor,
 )
 
+Finance_Agent = _make_agent_tool(
+    name="Finance_Agent",
+    description="Handle finance questions (pegging rates, revenue, invoices). Input is the user's request.",
+    executor_factory=get_finance_agent_executor,
+)
+
 # Combine sub-agent tools with RAG tools
-TOOLS = [HR_Agent, IT_Agent, RM_Agent, SQL_Agent] + RAG_TOOLS
+TOOLS = [HR_Agent, IT_Agent, RM_Agent, Finance_Agent, SQL_Agent] + RAG_TOOLS
