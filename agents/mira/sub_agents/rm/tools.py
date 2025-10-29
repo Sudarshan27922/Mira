@@ -47,6 +47,28 @@ def run_sql_agent(natural_language_request: str) -> str:
         return "I couldn’t retrieve that information right now. Please try again in a moment."
 
 
-RM_TOOLS = [allocate_resource, run_sql_agent]
+@tool("get_allocation_info")
+def get_allocation_info(request: str) -> str:
+    """Retrieve allocation info by delegating to the SQL agent with an allocation-focused request.
+
+    Use this when the user asks about allocation percentage, type, role, dates, whether allocated, end_notified, resource details,
+    segment, or on-site/off-site location. Automatically asks the SQL agent to look into the allocation table
+    and join employee for resource name/email.
+    """
+    try:
+        executor = get_sql_agent_executor()
+        nl = (
+            "You are checking allocation data. Verify allocation table columns using describe_table_columns if needed. "
+            "Answer only from the allocation table and join to employee on allocation.resource_id = employee.id for names/emails. "
+            "Respect time filters if provided (current = today between start_date and end_date; or overlap with a range). "
+            "Return a concise, non-technical summary. Query to fulfill: " + request
+        )
+        result = executor.invoke({"input": nl})
+        return _sanitize_user_text(result.get("output", ""))
+    except Exception:
+        return "I couldn’t retrieve the allocation details right now. Please try again shortly."
+
+
+RM_TOOLS = [allocate_resource, run_sql_agent, get_allocation_info]
 
 
