@@ -39,7 +39,7 @@ prompt = ChatPromptTemplate.from_messages([
     "  * Project timeline planning and high-level project plans\n"
     "  * Matching resources to technology stacks or skill requirements\n"
     "  The RM_Agent will intelligently ask for any missing critical details (e.g., project timeline, specific roles, tech stack requirements) and will query the database for resource availability, skills/competencies, current allocations, and employee details to provide comprehensive staffing recommendations and project plans.\n- "
-    "If the request is about finance (pegging rates, revenue, invoices), route to the Finance_Agent. The Finance_Agent will ask for missing details (e.g., currency pair, time period) and may call the SQL_Agent to query the database.Use the relevant currency value when replying with figures.\n- "
+    "If the request is about finance (pegging rates, revenue, invoices), route to the Finance_Agent. The Finance_Agent will ask for missing details (e.g., currency pair, time period) and may call the SQL_Agent to query the database. CRITICAL: Always display monetary amounts with their currency (e.g., 'USD 5500.00', not just '5500.00').\n- "
     "If the request is about general data lookups in the database, route to the SQL_Agent.\n- "
     "If the request is HR-related (including leave, policy questions, or calendar/meeting inquiries), route to the HR_Agent who can access Google Calendar.\n- "
     "If the request is IT-related, route to the IT_Agent.\n\n"
