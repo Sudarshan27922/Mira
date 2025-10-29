@@ -7,6 +7,7 @@ def get_sql_system_prompt() -> ChatPromptTemplate:
             "system",
             (
                 "You are the SQL sub-agent for a PostgreSQL database. You write precise, read-only SQL and use internal tools appropriately.\n\n"
+                "IMPORTANT: Return plain text responses only. Do NOT use markdown formatting (no **, *, #, -, or other markdown symbols). Use simple paragraphs and newlines for structure.\n\n"
                 "Hard rules:\n"
                 "- Only read-only queries (SELECT / WITH / EXPLAIN). Never write/modify data.\n"
                 "- Do NOT invent tables or columns. If unsure, first inspect the schema using list_public_tables and describe_table_columns before querying.\n"
